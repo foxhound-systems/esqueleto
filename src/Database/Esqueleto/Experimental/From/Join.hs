@@ -1,23 +1,25 @@
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE DataKinds             #-}
+{-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE TypeFamilies          #-}
+{-# LANGUAGE TypeOperators         #-}
+{-# LANGUAGE UndecidableInstances  #-}
 
 module Database.Esqueleto.Experimental.From.Join
     where
 
-import Data.Kind (Constraint)
-import Data.Proxy
-import Database.Esqueleto.Experimental.From
-import Database.Esqueleto.Experimental.From.SqlSetOperation
-import Database.Esqueleto.Experimental.ToAlias
-import Database.Esqueleto.Experimental.ToAliasReference
-import Database.Esqueleto.Experimental.ToMaybe
-import Database.Esqueleto.Internal.Internal hiding (From(..), from, on)
-import Database.Esqueleto.Internal.PersistentImport (Entity(..))
-import GHC.TypeLits
+import           Data.Kind                                            (Constraint)
+import           Data.Proxy
+import           Database.Esqueleto.Experimental.From
+import           Database.Esqueleto.Experimental.From.SqlSetOperation
+import           Database.Esqueleto.Experimental.ToAlias
+import           Database.Esqueleto.Experimental.ToAliasReference
+import           Database.Esqueleto.Experimental.ToMaybe
+import           Database.Esqueleto.Internal.Internal                 hiding
+                                                                      (From (..),
+                                                                       from, on)
+import           Database.Esqueleto.Internal.PersistentImport         (Entity (..))
+import           GHC.TypeLits
 
 -- | A left-precedence pair. Pronounced \"and\". Used to represent expressions
 -- that have been joined together.
@@ -56,7 +58,7 @@ type family ValidOnClauseValue a :: Constraint where
 -- \`on\` (\\(p :& bP) ->
 --         p ^. PersonId ==. bP ^. BlogPostAuthorId)
 -- @
-on :: ValidOnClauseValue a => a -> (b -> SqlExpr (Value Bool)) -> (a, b -> SqlExpr (Value Bool))
+on :: ValidOnClauseValue a => a -> (b -> SqlExpr Bool) -> (a, b -> SqlExpr Bool)
 on = (,)
 infix 9 `on`
 
@@ -73,7 +75,7 @@ type family ErrorOnLateral a :: Constraint where
 
 -- Type class magic to allow the use of the `InnerJoin` family of data constructors in from
 type family FromOnClause a where
-    FromOnClause (a, b -> SqlExpr (Value Bool)) = b
+    FromOnClause (a, b -> SqlExpr Bool) = b
     FromOnClause a = TypeError ('Text "Missing ON clause")
 
 instance {-# OVERLAPPABLE #-} From (InnerJoin a b) where
@@ -90,7 +92,7 @@ instance {-# OVERLAPPABLE #-} From (FullOuterJoin a b) where
     runFrom = undefined
 
 class FromInnerJoin lateral lhs rhs res where
-    runFromInnerJoin :: Proxy lateral -> lhs -> rhs -> (res -> SqlExpr (Value Bool)) -> SqlQuery (res, FromClause)
+    runFromInnerJoin :: Proxy lateral -> lhs -> rhs -> (res -> SqlExpr Bool) -> SqlQuery (res, FromClause)
 
 instance ( SqlSelect b r
          , ToAlias b
@@ -112,8 +114,8 @@ instance (From a, FromT a ~ a', From b, FromT b ~ b')
           let ret = leftVal :& rightVal
           pure $ (ret, FromJoin leftFrom InnerJoinKind rightFrom (Just (on' ret)))
 
-instance (FromInnerJoin (IsLateral b) a b b') => From (InnerJoin a (b, b' -> SqlExpr (Value Bool))) where
-    type FromT (InnerJoin a (b, b' -> SqlExpr (Value Bool))) = FromOnClause (b, b' -> SqlExpr(Value Bool))
+instance (FromInnerJoin (IsLateral b) a b b') => From (InnerJoin a (b, b' -> SqlExpr Bool)) where
+    type FromT (InnerJoin a (b, b' -> SqlExpr Bool)) = FromOnClause (b, b' -> SqlExpr Bool)
     runFrom (InnerJoin lhs (rhs, on')) = runFromInnerJoin (toProxy rhs) lhs rhs on'
         where
             toProxy :: b -> Proxy (IsLateral b)
@@ -149,7 +151,7 @@ instance {-# OVERLAPPING #-}
         pure $ (ret, FromJoin leftFrom CrossJoinKind rightFrom Nothing)
 
 class FromLeftJoin lateral lhs rhs res where
-    runFromLeftJoin :: Proxy lateral -> lhs -> rhs -> (res -> SqlExpr (Value Bool)) -> SqlQuery (res, FromClause)
+    runFromLeftJoin :: Proxy lateral -> lhs -> rhs -> (res -> SqlExpr Bool) -> SqlQuery (res, FromClause)
 
 instance ( From a
          , FromT a ~ a'
@@ -179,8 +181,8 @@ instance ( From a
                 pure $ (ret, FromJoin leftFrom LeftOuterJoinKind rightFrom (Just (on' ret)))
 
 instance ( FromLeftJoin (IsLateral b) a b b'
-         ) => From (LeftOuterJoin a (b, b' -> SqlExpr (Value Bool))) where
-            type FromT (LeftOuterJoin a (b, b' -> SqlExpr (Value Bool))) = FromOnClause (b, b' -> SqlExpr(Value Bool))
+         ) => From (LeftOuterJoin a (b, b' -> SqlExpr Bool)) where
+            type FromT (LeftOuterJoin a (b, b' -> SqlExpr Bool)) = FromOnClause (b, b' -> SqlExpr Bool)
             runFrom (LeftOuterJoin lhs (rhs, on')) =
                 runFromLeftJoin (toProxy rhs) lhs rhs on'
               where
@@ -196,8 +198,8 @@ instance ( From a
          , ToMaybe b'
          , mb ~ ToMaybeT b'
          , ErrorOnLateral b
-         ) => From (FullOuterJoin a (b, (ma :& mb) -> SqlExpr (Value Bool))) where
-            type FromT (FullOuterJoin a (b, (ma :& mb) -> SqlExpr (Value Bool))) = FromOnClause (b, (ma :& mb) -> SqlExpr(Value Bool))
+         ) => From (FullOuterJoin a (b, (ma :& mb) -> SqlExpr Bool)) where
+            type FromT (FullOuterJoin a (b, (ma :& mb) -> SqlExpr Bool)) = FromOnClause (b, (ma :& mb) -> SqlExpr Bool)
             runFrom (FullOuterJoin leftPart (rightPart, on')) = do
                 (leftVal, leftFrom) <- runFrom leftPart
                 (rightVal, rightFrom) <- runFrom rightPart
@@ -211,8 +213,8 @@ instance ( From a
          , From b
          , FromT b ~ b'
          , ErrorOnLateral b
-         ) => From (RightOuterJoin a (b, (ma :& b') -> SqlExpr (Value Bool))) where
-            type FromT (RightOuterJoin a (b, (ma :& b') -> SqlExpr (Value Bool))) = FromOnClause (b, (ma :& b') -> SqlExpr(Value Bool))
+         ) => From (RightOuterJoin a (b, (ma :& b') -> SqlExpr Bool)) where
+            type FromT (RightOuterJoin a (b, (ma :& b') -> SqlExpr Bool)) = FromOnClause (b, (ma :& b') -> SqlExpr Bool)
             runFrom (RightOuterJoin leftPart (rightPart, on')) = do
                 (leftVal, leftFrom) <- runFrom leftPart
                 (rightVal, rightFrom) <- runFrom rightPart

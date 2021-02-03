@@ -1,24 +1,29 @@
-{-# LANGUAGE DeriveFoldable #-}
-{-# LANGUAGE DeriveFunctor #-}
-{-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE DeriveTraversable #-}
+{-# LANGUAGE DeriveFoldable             #-}
+{-# LANGUAGE DeriveFunctor              #-}
+{-# LANGUAGE DeriveGeneric              #-}
+{-# LANGUAGE DeriveTraversable          #-}
+{-# LANGUAGE DerivingStrategies         #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# language DerivingStrategies #-}
+{-# LANGUAGE OverloadedStrings          #-}
 
 module Database.Esqueleto.PostgreSQL.JSON.Instances where
 
-import Data.Aeson (FromJSON(..), ToJSON(..), encode, eitherDecodeStrict)
-import Data.Bifunctor (first)
-import qualified Data.ByteString.Lazy as BSL (toStrict)
-import Data.String (IsString(..))
-import Data.Text (Text)
-import qualified Data.Text as T (concat, pack)
-import qualified Data.Text.Encoding as TE (decodeUtf8, encodeUtf8)
-import Database.Esqueleto (Value, just, val)
-import Database.Esqueleto.Internal.PersistentImport
-import Database.Esqueleto.Internal.Sql (SqlExpr)
-import GHC.Generics (Generic)
+import           Data.Aeson                                   (FromJSON (..),
+                                                               ToJSON (..),
+                                                               eitherDecodeStrict,
+                                                               encode)
+import           Data.Bifunctor                               (first)
+import qualified Data.ByteString.Lazy                         as BSL (toStrict)
+import           Data.String                                  (IsString (..))
+import           Data.Text                                    (Text)
+import qualified Data.Text                                    as T (concat,
+                                                                    pack)
+import qualified Data.Text.Encoding                           as TE (decodeUtf8,
+                                                                     encodeUtf8)
+import           Database.Esqueleto                           (just, val)
+import           Database.Esqueleto.Internal.PersistentImport
+import           Database.Esqueleto.Internal.Sql              (SqlExpr)
+import           GHC.Generics                                 (Generic)
 
 -- | Newtype wrapper around any type with a JSON representation.
 --
@@ -42,7 +47,7 @@ newtype JSONB a = JSONB { unJSONB :: a }
 -- | 'SqlExpr' of a NULL-able 'JSONB' value. Hence the 'Maybe'.
 --
 -- Note: NULL here is a PostgreSQL NULL, not a JSON 'null'
-type JSONBExpr a = SqlExpr (Value (Maybe (JSONB a)))
+type JSONBExpr a = SqlExpr (Maybe (JSONB a))
 
 -- | Convenience function to lift a regular value into
 -- a 'JSONB' expression.
@@ -72,7 +77,7 @@ data JSONAccessor
 instance Num JSONAccessor where
     fromInteger = JSONIndex . fromInteger
     negate (JSONIndex i) = JSONIndex $ negate i
-    negate (JSONKey _) = error "Can not negate a JSONKey"
+    negate (JSONKey _)   = error "Can not negate a JSONKey"
     (+) = numErr
     (-) = numErr
     (*) = numErr

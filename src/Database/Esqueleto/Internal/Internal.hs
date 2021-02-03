@@ -14,6 +14,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
+    
 
 -- | This is an internal module, anything exported by this module
 -- may change without a major version bump.  Please use only
@@ -22,6 +23,8 @@
 -- If you use this module, please report what your use case is on the issue
 -- tracker so we can safely support it.
 module Database.Esqueleto.Internal.Internal where
+
+import Data.Kind
 
 import Control.Applicative ((<|>))
 import Data.Coerce (coerce)
@@ -131,7 +134,7 @@ fromFinish (PreprocessedFrom ret f') = Q $ do
     return ret
 
 -- | @WHERE@ clause: restrict the query's result.
-where_ :: SqlExpr (Value Bool) -> SqlQuery ()
+where_ :: SqlExpr (Bool) -> SqlQuery ()
 where_ expr = Q $ W.tell mempty { sdWhereClause = Where expr }
 
 -- | An @ON@ clause, useful to describe how two tables are related. Cross joins
@@ -190,7 +193,7 @@ where_ expr = Q $ W.tell mempty { sdWhereClause = Where expr }
 --   'on' (baz '^.' BazId '==.' bar '^.' BarBazId)
 --   ...
 -- @
-on :: SqlExpr (Value Bool) -> SqlQuery ()
+on :: SqlExpr (Bool) -> SqlQuery ()
 on expr = Q $ W.tell mempty { sdFromClause = [OnClause expr] }
 
 -- | @GROUP BY@ clause. You can enclose multiple columns
@@ -249,14 +252,14 @@ orderBy :: [SqlExpr OrderBy] -> SqlQuery ()
 orderBy exprs = Q $ W.tell mempty { sdOrderByClause = exprs }
 
 -- | Ascending order of this field or SqlExpression.
-asc :: PersistField a => SqlExpr (Value a) -> SqlExpr OrderBy
+asc :: PersistField a => SqlExpr a -> SqlExpr OrderBy
 asc = orderByExpr " ASC"
 
 -- | Descending order of this field or SqlExpression.
-desc :: PersistField a => SqlExpr (Value a) -> SqlExpr OrderBy
+desc :: PersistField a => SqlExpr a -> SqlExpr OrderBy
 desc = orderByExpr " DESC" 
 
-orderByExpr :: TLB.Builder -> SqlExpr (Value a) -> SqlExpr OrderBy
+orderByExpr :: TLB.Builder -> SqlExpr a -> SqlExpr OrderBy
 orderByExpr orderByType (ERaw m f)
   | Just fields <- sqlExprMetaCompositeFields m =
         ERaw noMeta $ \_ info ->
@@ -336,7 +339,7 @@ distinctOn exprs act = Q (W.tell mempty { sdDistinctClause = DistinctOn exprs })
 -- be used by 'distinctOn'.
 --
 -- @since 2.2.4
-don :: SqlExpr (Value a) -> SqlExpr DistinctOn
+don :: SqlExpr a -> SqlExpr DistinctOn
 don = coerce
 
 -- | A convenience function that calls both 'distinctOn' and
@@ -376,7 +379,7 @@ rand = ERaw noMeta $ \_ _ -> ("RANDOM()", [])
 -- | @HAVING@.
 --
 -- @since 1.2.2
-having :: SqlExpr (Value Bool) -> SqlQuery ()
+having :: SqlExpr (Bool) -> SqlQuery ()
 having expr = Q $ W.tell mempty { sdHavingClause = Where expr }
 
 -- | Add a locking clause to the query.  Please read
@@ -409,7 +412,7 @@ SQL error.\n\n Instead, consider using one of the following alternatives: \n \
 -- is guaranteed to return just one row.
 --
 -- Deprecated in 3.2.0.
-sub_select :: PersistField a => SqlQuery (SqlExpr (Value a)) -> SqlExpr (Value a)
+sub_select :: (SqlSelect (SqlExpr a) a, PersistField a) => SqlQuery (SqlExpr a) -> SqlExpr a
 sub_select         = sub SELECT
 
 -- | Execute a subquery @SELECT@ in a 'SqlExpr'. The query passed to this
@@ -429,9 +432,9 @@ sub_select         = sub SELECT
 --
 -- @since 3.2.0
 subSelect
-  :: PersistField a
-  => SqlQuery (SqlExpr (Value a))
-  -> SqlExpr (Value (Maybe a))
+  :: (SqlSelect (SqlExpr a) a, PersistField a)   
+  => SqlQuery (SqlExpr a)
+  -> SqlExpr (Maybe a)
 subSelect query = just (subSelectUnsafe (query <* limit 1))
 
 -- | Execute a subquery @SELECT@ in a 'SqlExpr'. This function is a shorthand
@@ -443,9 +446,9 @@ subSelect query = just (subSelectUnsafe (query <* limit 1))
 --
 -- @since 3.2.0
 subSelectMaybe
-    :: PersistField a
-    => SqlQuery (SqlExpr (Value (Maybe a)))
-    -> SqlExpr (Value (Maybe a))
+    :: (SqlSelect (SqlExpr (Maybe a)) (Maybe a), PersistField a)
+    => SqlQuery (SqlExpr (Maybe a))
+    -> SqlExpr (Maybe a)
 subSelectMaybe = joinV . subSelect
 
 -- | Performs a @COUNT@ of the given query in a @subSelect@ manner. This is
@@ -453,9 +456,9 @@ subSelectMaybe = joinV . subSelect
 --
 -- @since 3.2.0
 subSelectCount
-    :: (Num a, PersistField a)
+    :: (Num a, PersistField a, SqlSelect (SqlExpr a) a)
     => SqlQuery ignored
-    -> SqlExpr (Value a)
+    -> SqlExpr a
 subSelectCount query =
     subSelectUnsafe $ do
         _ <- query
@@ -467,8 +470,8 @@ subSelectCount query =
 --
 -- @since 3.2.0
 subSelectList
-    :: PersistField a
-    => SqlQuery (SqlExpr (Value a))
+    :: (SqlSelect (SqlExpr a) a, PersistField a)
+    => SqlQuery (SqlExpr a)
     -> SqlExpr (ValueList a)
 subSelectList = subList_select
 
@@ -499,14 +502,15 @@ subSelectForeign
     ::
     ( BackendCompatible SqlBackend (PersistEntityBackend val1)
     , PersistEntity val1, PersistEntity val2, PersistField a
+    , SqlSelect (SqlExpr a) a
     )
     => SqlExpr (Entity val2)
     -- ^ An expression representing the table you have access to now.
     -> EntityField val2 (Key val1)
     -- ^ The foreign key field on the table.
-    -> (SqlExpr (Entity val1) -> SqlExpr (Value a))
+    -> (SqlExpr (Entity val1) -> SqlExpr a)
     -- ^ A function to extract a value from the foreign reference table.
-    -> SqlExpr (Value a)
+    -> SqlExpr a
 subSelectForeign expr foreignKey k =
     subSelectUnsafe $
     from $ \table -> do
@@ -529,7 +533,7 @@ subSelectForeign expr foreignKey k =
 -- 'subSelectMaybe'. For the most common safe use of this, see 'subSelectCount'.
 --
 -- @since 3.2.0
-subSelectUnsafe :: PersistField a => SqlQuery (SqlExpr (Value a)) -> SqlExpr (Value a)
+subSelectUnsafe :: (SqlSelect (SqlExpr a) a, PersistField a) => SqlQuery (SqlExpr a) -> SqlExpr a
 subSelectUnsafe = sub SELECT
 
 -- | Project a field of an entity.
@@ -537,7 +541,7 @@ subSelectUnsafe = sub SELECT
     :: forall typ val. (PersistEntity val, PersistField typ)
     => SqlExpr (Entity val)
     -> EntityField val typ
-    -> SqlExpr (Value typ)
+    -> SqlExpr typ
 ERaw m f ^. field
     | isIdField field = idFieldValue
     | Just alias <- sqlExprMetaAlias m =
@@ -577,8 +581,8 @@ ERaw m f ^. field
 -- | Project an SqlExpression that may be null, guarding against null cases.
 withNonNull
     :: PersistField typ
-    => SqlExpr (Value (Maybe typ))
-    -> (SqlExpr (Value typ) -> SqlQuery a)
+    => SqlExpr (Maybe typ)
+    -> (SqlExpr typ -> SqlQuery a)
     -> SqlQuery a
 withNonNull field f = do
     where_ $ not_ $ isNothing field
@@ -589,11 +593,11 @@ withNonNull field f = do
     :: (PersistEntity val, PersistField typ)
     => SqlExpr (Maybe (Entity val))
     -> EntityField val typ
-    -> SqlExpr (Value (Maybe typ))
+    -> SqlExpr (Maybe typ)
 ERaw m f ?. field = just (ERaw m f ^. field)
 
 -- | Lift a constant value from Haskell-land to the query.
-val  :: PersistField typ => typ -> SqlExpr (Value typ)
+val  :: PersistField typ => typ -> SqlExpr typ
 val v = ERaw noMeta $ \_ _ -> ("?", [toPersistValue v])
 
 -- | @IS NULL@ comparison.
@@ -617,7 +621,7 @@ val v = ERaw noMeta $ \_ _ -> ("?", [toPersistValue v])
 -- > - error: {lhs: v ==. val Nothing, rhs: Database.Esqueleto.isNothing v, name: Use Esqueleto's isNothing}
 -- > - error: {lhs: v !=. nothing, rhs: not_ (Database.Esqueleto.isNothing v), name: Use Esqueleto's not isNothing}
 -- > - error: {lhs: v !=. val Nothing, rhs: not_ (Database.Esqueleto.isNothing v), name: Use Esqueleto's not isNothing}
-isNothing :: PersistField typ => SqlExpr (Value (Maybe typ)) -> SqlExpr (Value Bool)
+isNothing :: PersistField typ => SqlExpr (Maybe typ) -> SqlExpr Bool
 isNothing v =
     case v of
         ERaw m f ->
@@ -634,20 +638,20 @@ isNothing v =
 -- | Analogous to 'Just', promotes a value of type @typ@ into
 -- one of type @Maybe typ@.  It should hold that @'val' . Just
 -- === just . 'val'@.
-just :: SqlExpr (Value typ) -> SqlExpr (Value (Maybe typ))
+just :: SqlExpr typ -> SqlExpr (Maybe typ)
 just = veryUnsafeCoerceSqlExprValue
 
 -- | @NULL@ value.
-nothing :: SqlExpr (Value (Maybe typ))
+nothing :: SqlExpr (Maybe typ)
 nothing = unsafeSqlValue "NULL"
 
 -- | Join nested 'Maybe's in a 'Value' into one. This is useful when
 -- calling aggregate functions on nullable fields.
-joinV :: SqlExpr (Value (Maybe (Maybe typ))) -> SqlExpr (Value (Maybe typ))
+joinV :: SqlExpr (Maybe (Maybe typ)) -> SqlExpr (Maybe typ)
 joinV = veryUnsafeCoerceSqlExprValue
 
 
-countHelper :: Num a => TLB.Builder -> TLB.Builder -> SqlExpr (Value typ) -> SqlExpr (Value a)
+countHelper :: Num a => TLB.Builder -> TLB.Builder -> SqlExpr typ -> SqlExpr a
 countHelper open close v =
     case v of
         ERaw meta f -> 
@@ -656,24 +660,24 @@ countHelper open close v =
             else 
                 countRawSql (f Never)
   where
-    countRawSql :: (IdentInfo -> (TLB.Builder, [PersistValue])) -> SqlExpr (Value a)
+    countRawSql :: (IdentInfo -> (TLB.Builder, [PersistValue])) -> SqlExpr a
     countRawSql x = ERaw noMeta $ \_ -> first (\b -> "COUNT" <> open <> parens b <> close) . x
 
 -- | @COUNT(*)@ value.
-countRows :: Num a => SqlExpr (Value a)
+countRows :: Num a => SqlExpr a
 countRows = unsafeSqlValue "COUNT(*)"
 
 -- | @COUNT@.
-count :: Num a => SqlExpr (Value typ) -> SqlExpr (Value a)
+count :: Num a => SqlExpr typ -> SqlExpr a
 count = countHelper ""           ""
 
 -- | @COUNT(DISTINCT x)@.
 --
 -- @since 2.4.1
-countDistinct :: Num a => SqlExpr (Value typ) -> SqlExpr (Value a)
+countDistinct :: Num a => SqlExpr typ -> SqlExpr a
 countDistinct = countHelper "(DISTINCT " ")"
 
-not_ :: SqlExpr (Value Bool) -> SqlExpr (Value Bool)
+not_ :: SqlExpr (Bool) -> SqlExpr (Bool)
 not_ v = ERaw noMeta $ \p info -> first ("NOT " <>) $ x p info
   where
     x p info =
@@ -685,66 +689,66 @@ not_ v = ERaw noMeta $ \p info -> first ("NOT " <>) $ x p info
                     let (b, vals) = f Never info
                     in (parensM p b, vals)
 
-(==.) :: PersistField typ => SqlExpr (Value typ) -> SqlExpr (Value typ) -> SqlExpr (Value Bool)
+(==.) :: PersistField typ => SqlExpr typ -> SqlExpr typ -> SqlExpr (Bool)
 (==.) = unsafeSqlBinOpComposite " = " " AND "
 
-(>=.) :: PersistField typ => SqlExpr (Value typ) -> SqlExpr (Value typ) -> SqlExpr (Value Bool)
+(>=.) :: PersistField typ => SqlExpr typ -> SqlExpr typ -> SqlExpr (Bool)
 (>=.) = unsafeSqlBinOp " >= "
 
-(>.)  :: PersistField typ => SqlExpr (Value typ) -> SqlExpr (Value typ) -> SqlExpr (Value Bool)
+(>.)  :: PersistField typ => SqlExpr typ -> SqlExpr typ -> SqlExpr (Bool)
 (>.)  = unsafeSqlBinOp " > "
 
-(<=.) :: PersistField typ => SqlExpr (Value typ) -> SqlExpr (Value typ) -> SqlExpr (Value Bool)
+(<=.) :: PersistField typ => SqlExpr typ -> SqlExpr typ -> SqlExpr (Bool)
 (<=.) = unsafeSqlBinOp " <= "
 
-(<.)  :: PersistField typ => SqlExpr (Value typ) -> SqlExpr (Value typ) -> SqlExpr (Value Bool)
+(<.)  :: PersistField typ => SqlExpr typ -> SqlExpr typ -> SqlExpr (Bool)
 (<.)  = unsafeSqlBinOp " < "
-(!=.) :: PersistField typ => SqlExpr (Value typ) -> SqlExpr (Value typ) -> SqlExpr (Value Bool)
+(!=.) :: PersistField typ => SqlExpr typ -> SqlExpr typ -> SqlExpr (Bool)
 (!=.) = unsafeSqlBinOpComposite " != " " OR "
 
-(&&.) :: SqlExpr (Value Bool) -> SqlExpr (Value Bool) -> SqlExpr (Value Bool)
+(&&.) :: SqlExpr (Bool) -> SqlExpr (Bool) -> SqlExpr (Bool)
 (&&.) = unsafeSqlBinOp " AND "
 
-(||.) :: SqlExpr (Value Bool) -> SqlExpr (Value Bool) -> SqlExpr (Value Bool)
+(||.) :: SqlExpr (Bool) -> SqlExpr (Bool) -> SqlExpr (Bool)
 (||.) = unsafeSqlBinOp " OR "
 
-(+.)  :: PersistField a => SqlExpr (Value a) -> SqlExpr (Value a) -> SqlExpr (Value a)
+(+.)  :: PersistField a => SqlExpr a -> SqlExpr a -> SqlExpr a
 (+.)  = unsafeSqlBinOp " + "
 
-(-.)  :: PersistField a => SqlExpr (Value a) -> SqlExpr (Value a) -> SqlExpr (Value a)
+(-.)  :: PersistField a => SqlExpr a -> SqlExpr a -> SqlExpr a
 (-.)  = unsafeSqlBinOp " - "
 
-(/.)  :: PersistField a => SqlExpr (Value a) -> SqlExpr (Value a) -> SqlExpr (Value a)
+(/.)  :: PersistField a => SqlExpr a -> SqlExpr a -> SqlExpr a
 (/.)  = unsafeSqlBinOp " / "
 
-(*.)  :: PersistField a => SqlExpr (Value a) -> SqlExpr (Value a) -> SqlExpr (Value a)
+(*.)  :: PersistField a => SqlExpr a -> SqlExpr a -> SqlExpr a
 (*.)  = unsafeSqlBinOp " * "
 
 -- | @BETWEEN@.
 --
 -- @since: 3.1.0
-between :: PersistField a => SqlExpr (Value a) -> (SqlExpr (Value a), SqlExpr (Value a)) -> SqlExpr (Value Bool)
+between :: PersistField a => SqlExpr a -> (SqlExpr a, SqlExpr a) -> SqlExpr (Bool)
 a `between` (b, c) = a >=. b &&. a <=. c
 
-random_  :: (PersistField a, Num a) => SqlExpr (Value a)
+random_  :: (PersistField a, Num a) => SqlExpr a
 random_  = unsafeSqlValue "RANDOM()"
 
-round_   :: (PersistField a, Num a, PersistField b, Num b) => SqlExpr (Value a) -> SqlExpr (Value b)
+round_   :: (PersistField a, Num a, PersistField b, Num b) => SqlExpr a -> SqlExpr b
 round_   = unsafeSqlFunction "ROUND"
 
-ceiling_ :: (PersistField a, Num a, PersistField b, Num b) => SqlExpr (Value a) -> SqlExpr (Value b)
+ceiling_ :: (PersistField a, Num a, PersistField b, Num b) => SqlExpr a -> SqlExpr b
 ceiling_ = unsafeSqlFunction "CEILING"
 
-floor_   :: (PersistField a, Num a, PersistField b, Num b) => SqlExpr (Value a) -> SqlExpr (Value b)
+floor_   :: (PersistField a, Num a, PersistField b, Num b) => SqlExpr a -> SqlExpr b
 floor_   = unsafeSqlFunction "FLOOR"
 
-sum_     :: (PersistField a, PersistField b) => SqlExpr (Value a) -> SqlExpr (Value (Maybe b))
+sum_     :: (PersistField a, PersistField b) => SqlExpr a -> SqlExpr (Maybe b)
 sum_     = unsafeSqlFunction "SUM"
-min_     :: (PersistField a) => SqlExpr (Value a) -> SqlExpr (Value (Maybe a))
+min_     :: (PersistField a) => SqlExpr a -> SqlExpr (Maybe a)
 min_     = unsafeSqlFunction "MIN"
-max_     :: (PersistField a) => SqlExpr (Value a) -> SqlExpr (Value (Maybe a))
+max_     :: (PersistField a) => SqlExpr a -> SqlExpr (Maybe a)
 max_     = unsafeSqlFunction "MAX"
-avg_     :: (PersistField a, PersistField b) => SqlExpr (Value a) -> SqlExpr (Value (Maybe b))
+avg_     :: (PersistField a, PersistField b) => SqlExpr a -> SqlExpr (Maybe b)
 avg_     = unsafeSqlFunction "AVG"
 
 -- | Allow a number of one type to be used as one of another
@@ -764,13 +768,13 @@ avg_     = unsafeSqlFunction "AVG"
 -- not being able to parse it.
 --
 -- @since 2.2.9
-castNum :: (Num a, Num b) => SqlExpr (Value a) -> SqlExpr (Value b)
+castNum :: (Num a, Num b) => SqlExpr a -> SqlExpr b
 castNum  = veryUnsafeCoerceSqlExprValue
 
 -- | Same as 'castNum', but for nullable values.
 --
 -- @since 2.2.9
-castNumM :: (Num a, Num b) => SqlExpr (Value (Maybe a)) -> SqlExpr (Value (Maybe b))
+castNumM :: (Num a, Num b) => SqlExpr (Maybe a) -> SqlExpr (Maybe b)
 castNumM = veryUnsafeCoerceSqlExprValue
 
 -- | @COALESCE@ function. Evaluates the arguments in order and
@@ -780,7 +784,7 @@ castNumM = veryUnsafeCoerceSqlExprValue
 -- documentation.
 --
 -- @since 1.4.3
-coalesce :: PersistField a => [SqlExpr (Value (Maybe a))] -> SqlExpr (Value (Maybe a))
+coalesce :: PersistField a => [SqlExpr (Maybe a)] -> SqlExpr (Maybe a)
 coalesce              = unsafeSqlFunctionParens "COALESCE"
 
 -- | Like @coalesce@, but takes a non-nullable SqlExpression
@@ -788,50 +792,50 @@ coalesce              = unsafeSqlFunctionParens "COALESCE"
 -- a non-NULL result.
 --
 -- @since 1.4.3
-coalesceDefault :: PersistField a => [SqlExpr (Value (Maybe a))] -> SqlExpr (Value a) -> SqlExpr (Value a)
+coalesceDefault :: PersistField a => [SqlExpr (Maybe a)] -> SqlExpr a -> SqlExpr a
 coalesceDefault exprs = unsafeSqlFunctionParens "COALESCE" . (exprs ++) . return . just
 
 -- | @LOWER@ function.
-lower_ :: SqlString s => SqlExpr (Value s) -> SqlExpr (Value s)
+lower_ :: SqlString s => SqlExpr s -> SqlExpr s
 lower_  = unsafeSqlFunction "LOWER"
 
 -- | @UPPER@ function.
 -- @since 3.3.0
-upper_ :: SqlString s => SqlExpr (Value s) -> SqlExpr (Value s)
+upper_ :: SqlString s => SqlExpr s -> SqlExpr s
 upper_  = unsafeSqlFunction "UPPER"
 
 -- | @TRIM@ function.
 -- @since 3.3.0
-trim_ :: SqlString s => SqlExpr (Value s) -> SqlExpr (Value s)
+trim_ :: SqlString s => SqlExpr s -> SqlExpr s
 trim_  = unsafeSqlFunction "TRIM"
 
 -- | @RTRIM@ function.
 -- @since 3.3.0
-rtrim_ :: SqlString s => SqlExpr (Value s) -> SqlExpr (Value s)
+rtrim_ :: SqlString s => SqlExpr s -> SqlExpr s
 rtrim_  = unsafeSqlFunction "RTRIM"
 
 -- | @LTRIM@ function.
 -- @since 3.3.0
-ltrim_ :: SqlString s => SqlExpr (Value s) -> SqlExpr (Value s)
+ltrim_ :: SqlString s => SqlExpr s -> SqlExpr s
 ltrim_  = unsafeSqlFunction "LTRIM"
 
 -- | @LENGTH@ function.
 -- @since 3.3.0
-length_ :: (SqlString s, Num a) => SqlExpr (Value s) -> SqlExpr (Value a)
+length_ :: (SqlString s, Num a) => SqlExpr s -> SqlExpr a
 length_ = unsafeSqlFunction "LENGTH"
 
 -- | @LEFT@ function.
 -- @since 3.3.0
-left_ :: (SqlString s, Num a) => (SqlExpr (Value s), SqlExpr (Value a)) -> SqlExpr (Value s)
+left_ :: (SqlString s, Num a) => (SqlExpr s, SqlExpr a) -> SqlExpr s 
 left_ = unsafeSqlFunction "LEFT"
 
 -- | @RIGHT@ function.
 -- @since 3.3.0
-right_ :: (SqlString s, Num a) => (SqlExpr (Value s), SqlExpr (Value a)) -> SqlExpr (Value s)
+right_ :: (SqlString s, Num a) => (SqlExpr s, SqlExpr a) -> SqlExpr s 
 right_ = unsafeSqlFunction "RIGHT"
 
 -- | @LIKE@ operator.
-like :: SqlString s => SqlExpr (Value s) -> SqlExpr (Value s) -> SqlExpr (Value Bool)
+like :: SqlString s => SqlExpr s -> SqlExpr s -> SqlExpr (Bool)
 like    = unsafeSqlBinOp    " LIKE "
 
 -- | @ILIKE@ operator (case-insensitive @LIKE@).
@@ -839,7 +843,7 @@ like    = unsafeSqlBinOp    " LIKE "
 -- Supported by PostgreSQL only.
 --
 -- @since 2.2.3
-ilike :: SqlString s => SqlExpr (Value s) -> SqlExpr (Value s) -> SqlExpr (Value Bool)
+ilike :: SqlString s => SqlExpr s -> SqlExpr s -> SqlExpr (Bool)
 ilike   = unsafeSqlBinOp    " ILIKE "
 
 -- | The string @'%'@.  May be useful while using 'like' and
@@ -850,18 +854,18 @@ ilike   = unsafeSqlBinOp    " ILIKE "
 -- @
 -- name `'like`` (%) ++. 'val' \"John\" ++. (%)
 -- @
-(%) :: SqlString s => SqlExpr (Value s)
+(%) :: SqlString s => SqlExpr s
 (%)     = unsafeSqlValue    "'%'"
 
 -- | The @CONCAT@ function with a variable number of
 -- parameters.  Supported by MySQL and PostgreSQL.
-concat_ :: SqlString s => [SqlExpr (Value s)] -> SqlExpr (Value s)
+concat_ :: SqlString s => [SqlExpr s] -> SqlExpr s
 concat_ = unsafeSqlFunction "CONCAT"
 
 -- | The @||@ string concatenation operator (named after
 -- Haskell's '++' in order to avoid naming clash with '||.').
 -- Supported by SQLite and PostgreSQL.
-(++.) :: SqlString s => SqlExpr (Value s) -> SqlExpr (Value s) -> SqlExpr (Value s)
+(++.) :: SqlString s => SqlExpr s -> SqlExpr s -> SqlExpr s
 (++.)   = unsafeSqlBinOp    " || "
 
 -- | Cast a string type into 'Text'.  This function
@@ -874,12 +878,12 @@ concat_ = unsafeSqlFunction "CONCAT"
 -- since 'Maybe' is an instance of 'SqlString', it's possible
 -- to turn a nullable value into a non-nullable one.  Avoid
 -- using this function if possible.
-castString :: (SqlString s, SqlString r) => SqlExpr (Value s) -> SqlExpr (Value r)
+castString :: (SqlString s, SqlString r) => SqlExpr s -> SqlExpr r
 castString = veryUnsafeCoerceSqlExprValue
 
 -- | Execute a subquery @SELECT@ in an SqlExpression.  Returns a
 -- list of values.
-subList_select :: PersistField a => SqlQuery (SqlExpr (Value a)) -> SqlExpr (ValueList a)
+subList_select :: (SqlSelect (SqlExpr a) a,  PersistField a) => SqlQuery (SqlExpr a) -> SqlExpr (ValueList a)
 subList_select query = ERaw noMeta $ \_ info -> first parens $ toRawSql SELECT info query
 
 
@@ -915,7 +919,7 @@ justList (ERaw m f) = ERaw m f
 -- @
 --
 -- Where @personIds@ is of type @[Key Person]@.
-in_ :: PersistField typ => SqlExpr (Value typ) -> SqlExpr (ValueList typ) -> SqlExpr (Value Bool)
+in_ :: PersistField typ => SqlExpr typ -> SqlExpr (ValueList typ) -> SqlExpr (Bool)
 (ERaw _ v) `in_` (ERaw _ list) = 
     ERaw noMeta $ \p info ->
         let (b1, vals1) = v Parens info 
@@ -927,7 +931,7 @@ in_ :: PersistField typ => SqlExpr (Value typ) -> SqlExpr (ValueList typ) -> Sql
             (b1 <> " IN " <> b2, vals1 <> vals2)
 
 -- | @NOT IN@ operator.
-notIn :: PersistField typ => SqlExpr (Value typ) -> SqlExpr (ValueList typ) -> SqlExpr (Value Bool)
+notIn :: PersistField typ => SqlExpr typ -> SqlExpr (ValueList typ) -> SqlExpr (Bool)
 (ERaw _ v) `notIn` (ERaw _ list) = 
     ERaw noMeta $ \p info ->
         let (b1, vals1) = v Parens info 
@@ -944,14 +948,14 @@ notIn :: PersistField typ => SqlExpr (Value typ) -> SqlExpr (ValueList typ) -> S
 --          'where_' (post '^.' BlogPostAuthorId '==.' person '^.' PersonId)
 -- return person
 -- @
-exists :: SqlQuery () -> SqlExpr (Value Bool)
+exists :: SqlQuery () -> SqlExpr (Bool)
 exists q = ERaw noMeta $ \p info ->    
     let ERaw _ f = existsHelper q
         (b, vals) = f Never info
     in ( parensM p $ "EXISTS " <> b, vals)
 
 -- | @NOT EXISTS@ operator.
-notExists :: SqlQuery () -> SqlExpr (Value Bool)
+notExists :: SqlQuery () -> SqlExpr (Bool)
 notExists q = ERaw noMeta $ \p info ->    
     let ERaw _ f = existsHelper q 
         (b, vals) = f Never info
@@ -965,27 +969,27 @@ set ent upds = Q $ W.tell mempty { sdSetClause = map apply upds }
   where
     apply f = SetClause (f ent)
 
-(=.)  :: (PersistEntity val, PersistField typ) => EntityField val typ -> SqlExpr (Value typ) -> (SqlExpr (Entity val) -> SqlExpr Update )
+(=.)  :: (PersistEntity val, PersistField typ) => EntityField val typ -> SqlExpr typ -> (SqlExpr (Entity val) -> SqlExpr Update )
 field  =. expr = setAux field (const expr)
 
-(+=.) :: (PersistEntity val, PersistField a) => EntityField val a -> SqlExpr (Value a) -> (SqlExpr (Entity val) -> SqlExpr Update)
+(+=.) :: (PersistEntity val, PersistField a) => EntityField val a -> SqlExpr a -> (SqlExpr (Entity val) -> SqlExpr Update)
 field +=. expr = setAux field (\ent -> ent ^. field +. expr)
 
-(-=.) :: (PersistEntity val, PersistField a) => EntityField val a -> SqlExpr (Value a) -> (SqlExpr (Entity val) -> SqlExpr Update)
+(-=.) :: (PersistEntity val, PersistField a) => EntityField val a -> SqlExpr a -> (SqlExpr (Entity val) -> SqlExpr Update)
 field -=. expr = setAux field (\ent -> ent ^. field -. expr)
 
-(*=.) :: (PersistEntity val, PersistField a) => EntityField val a -> SqlExpr (Value a) -> (SqlExpr (Entity val) -> SqlExpr Update)
+(*=.) :: (PersistEntity val, PersistField a) => EntityField val a -> SqlExpr a -> (SqlExpr (Entity val) -> SqlExpr Update)
 field *=. expr = setAux field (\ent -> ent ^. field *. expr)
 
-(/=.) :: (PersistEntity val, PersistField a) => EntityField val a -> SqlExpr (Value a) -> (SqlExpr (Entity val) -> SqlExpr Update)
+(/=.) :: (PersistEntity val, PersistField a) => EntityField val a -> SqlExpr a -> (SqlExpr (Entity val) -> SqlExpr Update)
 field /=. expr = setAux field (\ent -> ent ^. field /. expr)
 
 -- | Apply a 'PersistField' constructor to @SqlExpr Value@ arguments.
-(<#) :: (a -> b) -> SqlExpr (Value a) -> SqlExpr (Insertion b)
+(<#) :: (a -> b) -> SqlExpr a -> SqlExpr (Insertion b)
 (<#) _ (ERaw _ f)        = ERaw noMeta f 
 
 -- | Apply extra @SqlExpr Value@ arguments to a 'PersistField' constructor
-(<&>) :: SqlExpr (Insertion (a -> b)) -> SqlExpr (Value a) -> SqlExpr (Insertion b)
+(<&>) :: SqlExpr (Insertion (a -> b)) -> SqlExpr a -> SqlExpr (Insertion b)
 (ERaw _ f) <&> (ERaw _ g) =
     ERaw noMeta $ \_ info ->
         let (fb, fv) = f Never info 
@@ -1033,7 +1037,7 @@ field /=. expr = setAux field (\ent -> ent ^. field /. expr)
 --      reproduce this via 'nothing'.
 --
 -- @since 2.1.2
-case_ :: PersistField a => [(SqlExpr (Value Bool), SqlExpr (Value a))] -> SqlExpr (Value a) -> SqlExpr (Value a)
+case_ :: PersistField a => [(SqlExpr (Bool), SqlExpr a)] -> SqlExpr a -> SqlExpr a
 case_ = unsafeSqlCase
 
 -- | Convert an entity's key into another entity's.
@@ -1072,7 +1076,7 @@ case_ = unsafeSqlCase
 -- one of the example above.
 --
 -- @since 2.4.3
-toBaseId :: ToBaseId ent => SqlExpr (Value (Key ent)) -> SqlExpr (Value (Key (BaseEnt ent)))
+toBaseId :: ToBaseId ent => SqlExpr (Key ent) -> SqlExpr (Key (BaseEnt ent))
 toBaseId = veryUnsafeCoerceSqlExprValue
 
 {-# DEPRECATED random_ "Since 2.6.0: `random_` is not uniform across all databases! Please use a specific one such as 'Database.Esqueleto.PostgreSQL.random_', 'Database.Esqueleto.MySQL.random_', or 'Database.Esqueleto.SQLite.random_'" #-}
@@ -1092,7 +1096,7 @@ infixl 2 `InnerJoin`, `CrossJoin`, `LeftOuterJoin`, `RightOuterJoin`, `FullOuter
 -- | Syntax sugar for 'case_'.
 --
 -- @since 2.1.2
-when_ :: expr (Value Bool) -> () -> expr a -> (expr (Value Bool), expr a)
+when_ :: expr (Bool) -> () -> expr a -> (expr (Bool), expr a)
 when_ cond _ expr = (cond, expr)
 
 -- | Syntax sugar for 'case_'.
@@ -1128,9 +1132,9 @@ instance Monad Value where
 -- 'valList', 'in_' and 'exists').
 newtype ValueList a = ValueList a deriving (Eq, Ord, Show, Typeable)
 
--- | A wrapper type for for any @expr (Value a)@ for all a.
+-- | A wrapper type for for any @expr a@ for all a.
 data SomeValue where
-    SomeValue :: SqlExpr (Value a) -> SomeValue
+    SomeValue :: SqlExpr a -> SomeValue
 
 -- | A class of things that can be converted into a list of SomeValue. It has
 -- instances for tuples and is the reason why 'groupBy' can take tuples, like
@@ -1736,8 +1740,8 @@ instance Monoid DistinctClause where
 -- | A part of a @FROM@ clause.
 data FromClause
     = FromStart Ident EntityDef
-    | FromJoin FromClause JoinKind FromClause (Maybe (SqlExpr (Value Bool)))
-    | OnClause (SqlExpr (Value Bool))
+    | FromJoin FromClause JoinKind FromClause (Maybe (SqlExpr (Bool)))
+    | OnClause (SqlExpr (Bool))
     | FromQuery Ident (IdentInfo -> (TLB.Builder, [PersistValue])) SubQueryType
     | FromIdent Ident
 
@@ -1802,7 +1806,7 @@ newtype SetClause = SetClause (SqlExpr Update)
 collectOnClauses
     :: SqlBackend
     -> [FromClause]
-    -> Either (SqlExpr (Value Bool)) [FromClause]
+    -> Either (SqlExpr (Bool)) [FromClause]
 collectOnClauses sqlBackend = go Set.empty []
   where
     go is []  (f@(FromStart i _) : fs) =
@@ -1818,8 +1822,8 @@ collectOnClauses sqlBackend = go Set.empty []
     findMatching
         :: Set Ident
         -> [FromClause]
-        -> SqlExpr (Value Bool)
-        -> Either (SqlExpr (Value Bool)) (Set Ident, [FromClause])
+        -> SqlExpr (Bool)
+        -> Either (SqlExpr (Bool)) (Set Ident, [FromClause])
     findMatching idents fromClauses expr =
         case fromClauses of
             f : acc ->
@@ -1850,7 +1854,7 @@ collectOnClauses sqlBackend = go Set.empty []
 
     tryMatch
         :: Set Ident
-        -> SqlExpr (Value Bool)
+        -> SqlExpr (Bool)
         -> FromClause
         -> Maybe (Set Ident, FromClause)
     tryMatch idents expr fromClause =
@@ -1915,7 +1919,7 @@ collectOnClauses sqlBackend = go Set.empty []
           $ renderedExpr
 
 -- | A complete @WHERE@ clause.
-data WhereClause = Where (SqlExpr (Value Bool))
+data WhereClause = Where (SqlExpr (Bool))
                  | NoWhere
 
 instance Semigroup WhereClause where
@@ -2079,7 +2083,7 @@ parensM Parens = parens
 
 data OrderByType = ASC | DESC
 
-instance ToSomeValues (SqlExpr (Value a)) where
+instance ToSomeValues (SqlExpr a) where
   toSomeValues a = [SomeValue a]
 
 fieldName
@@ -2091,29 +2095,29 @@ fieldName info = fromDBName info . fieldDB . persistFieldDef
 setAux
     :: (PersistEntity val, PersistField typ)
     => EntityField val typ
-    -> (SqlExpr (Entity val) -> SqlExpr (Value typ))
+    -> (SqlExpr (Entity val) -> SqlExpr typ)
     -> (SqlExpr (Entity val) -> SqlExpr Update)
 setAux field value = \ent -> ERaw noMeta $ \_ info ->
     let ERaw _ valueF = value ent
         (valueToSet, valueVals) = valueF Parens info
     in (fieldName info field <> " = " <> valueToSet, valueVals)
 
-sub :: PersistField a => Mode -> SqlQuery (SqlExpr (Value a)) -> SqlExpr (Value a)
+sub :: (SqlSelect (SqlExpr a) a, PersistField a) => Mode -> SqlQuery (SqlExpr a) -> SqlExpr a
 sub mode query = ERaw noMeta $ \_ info -> first parens $ toRawSql mode info query
 
 fromDBName :: IdentInfo -> DBName -> TLB.Builder
 fromDBName (conn, _) = TLB.fromText . connEscapeName conn
 
-existsHelper :: SqlQuery () -> SqlExpr (Value Bool)
+existsHelper :: SqlQuery () -> SqlExpr (Bool)
 existsHelper = sub SELECT . (>> return true)
   where
-    true :: SqlExpr (Value Bool)
+    true :: SqlExpr (Bool)
     true = val True
 
 -- | (Internal) Create a case statement.
 --
 -- Since: 2.1.1
-unsafeSqlCase :: PersistField a => [(SqlExpr (Value Bool), SqlExpr (Value a))] -> SqlExpr (Value a) -> SqlExpr (Value a)
+unsafeSqlCase :: PersistField a => [(SqlExpr (Bool), SqlExpr a)] -> SqlExpr a -> SqlExpr a
 unsafeSqlCase when v = ERaw noMeta buildCase
   where
     buildCase :: NeedParens -> IdentInfo -> (TLB.Builder, [PersistValue])
@@ -2122,17 +2126,17 @@ unsafeSqlCase when v = ERaw noMeta buildCase
             (whenText, whenVals) = mapWhen when Parens info
         in ( "CASE" <> whenText <> " ELSE " <> elseText <> " END", whenVals <> elseVals)
 
-    mapWhen :: [(SqlExpr (Value Bool), SqlExpr (Value a))] -> NeedParens -> IdentInfo -> (TLB.Builder, [PersistValue])
+    mapWhen :: [(SqlExpr (Bool), SqlExpr a)] -> NeedParens -> IdentInfo -> (TLB.Builder, [PersistValue])
     mapWhen []    _ _    = throw (UnexpectedCaseErr UnsafeSqlCaseError)
     mapWhen when' p info = foldl (foldHelp p info) (mempty, mempty) when'
 
-    foldHelp :: NeedParens -> IdentInfo -> (TLB.Builder, [PersistValue]) -> (SqlExpr (Value Bool), SqlExpr (Value a)) -> (TLB.Builder, [PersistValue])
+    foldHelp :: NeedParens -> IdentInfo -> (TLB.Builder, [PersistValue]) -> (SqlExpr (Bool), SqlExpr a) -> (TLB.Builder, [PersistValue])
     foldHelp p info (b0, vals0) (v1, v2) =
         let (b1, vals1) = valueToSql v1 p info
             (b2, vals2) = valueToSql v2 p info
         in ( b0 <> " WHEN " <> b1 <> " THEN " <> b2, vals0 <> vals1 <> vals2 )
 
-    valueToSql :: SqlExpr (Value a) -> NeedParens -> IdentInfo -> (TLB.Builder, [PersistValue])
+    valueToSql :: SqlExpr a -> NeedParens -> IdentInfo -> (TLB.Builder, [PersistValue])
     valueToSql (ERaw _ f) p = f p
 
 -- | (Internal) Create a custom binary operator.  You /should/
@@ -2141,13 +2145,13 @@ unsafeSqlCase when v = ERaw noMeta buildCase
 -- signature.  For example:
 --
 -- @
--- (==.) :: SqlExpr (Value a) -> SqlExpr (Value a) -> SqlExpr (Value Bool)
+-- (==.) :: SqlExpr a -> SqlExpr a -> SqlExpr (Bool)
 -- (==.) = unsafeSqlBinOp " = "
 -- @
 --
 -- In the example above, we constraint the arguments to be of the
 -- same type and constraint the result to be a boolean value.
-unsafeSqlBinOp :: TLB.Builder -> SqlExpr (Value a) -> SqlExpr (Value b) -> SqlExpr (Value c)
+unsafeSqlBinOp :: TLB.Builder -> SqlExpr a -> SqlExpr b -> SqlExpr c
 unsafeSqlBinOp op (ERaw m1 f1) (ERaw m2 f2) 
   | not (hasCompositeKeyMeta m1 || hasCompositeKeyMeta m2) = ERaw noMeta f
   where
@@ -2160,7 +2164,7 @@ unsafeSqlBinOp op (ERaw m1 f1) (ERaw m2 f2)
             )
 unsafeSqlBinOp op a b = unsafeSqlBinOp op (construct a) (construct b)
   where
-    construct :: SqlExpr (Value a) -> SqlExpr (Value a)
+    construct :: SqlExpr a -> SqlExpr a
     construct (ERaw m f) =
         case sqlExprMetaCompositeFields m of
             Just fields ->
@@ -2182,7 +2186,7 @@ unsafeSqlBinOp op a b = unsafeSqlBinOp op (construct a) (construct b)
 -- Usage example:
 --
 -- @
--- (==.) :: SqlExpr (Value a) -> SqlExpr (Value a) -> SqlExpr (Value Bool)
+-- (==.) :: SqlExpr a -> SqlExpr a -> SqlExpr (Bool)
 -- (==.) = unsafeSqlBinOpComposite " = " " AND "
 -- @
 --
@@ -2198,15 +2202,15 @@ unsafeSqlBinOp op a b = unsafeSqlBinOp op (construct a) (construct b)
 --   - If it is not a single placeholder, then it's assumed to be
 --   a foreign (composite or not) key, so we enforce that it has
 --   no placeholders and split it on the commas.
-unsafeSqlBinOpComposite :: TLB.Builder -> TLB.Builder -> SqlExpr (Value a) -> SqlExpr (Value b) -> SqlExpr (Value c)
+unsafeSqlBinOpComposite :: TLB.Builder -> TLB.Builder -> SqlExpr a -> SqlExpr b -> SqlExpr c
 unsafeSqlBinOpComposite op sep a b
     | isCompositeKey a || isCompositeKey b = ERaw noMeta $ const $ compose (listify a) (listify b)
     | otherwise = unsafeSqlBinOp op a b
   where
-    isCompositeKey :: SqlExpr (Value x) -> Bool
+    isCompositeKey :: SqlExpr x -> Bool
     isCompositeKey (ERaw m _) = hasCompositeKeyMeta m
 
-    listify :: SqlExpr (Value x) -> IdentInfo -> ([TLB.Builder], [PersistValue])
+    listify :: SqlExpr x -> IdentInfo -> ([TLB.Builder], [PersistValue])
     listify (ERaw m f)
         | Just f <- sqlExprMetaCompositeFields m = flip (,) [] . f
         | otherwise = deconstruct . f Parens
@@ -2229,7 +2233,7 @@ unsafeSqlBinOpComposite op sep a b
 
 -- | (Internal) A raw SQL value.  The same warning from
 -- 'unsafeSqlBinOp' applies to this function as well.
-unsafeSqlValue :: TLB.Builder -> SqlExpr (Value a)
+unsafeSqlValue :: TLB.Builder -> SqlExpr a
 unsafeSqlValue v = ERaw noMeta $ \_ _ -> (v, mempty)
 {-# INLINE unsafeSqlValue #-}
 
@@ -2237,14 +2241,14 @@ unsafeSqlEntity :: PersistEntity ent => Ident -> SqlExpr (Entity ent)
 unsafeSqlEntity ident = ERaw noMeta $ \_ info ->
     (useIdent info ident, [])
 
-valueToFunctionArg :: IdentInfo -> SqlExpr (Value a) -> (TLB.Builder, [PersistValue])
+valueToFunctionArg :: IdentInfo -> SqlExpr a -> (TLB.Builder, [PersistValue])
 valueToFunctionArg info (ERaw _ f) = f Never info
 
 -- | (Internal) A raw SQL function.  Once again, the same warning
 -- from 'unsafeSqlBinOp' applies to this function as well.
 unsafeSqlFunction
     :: UnsafeSqlFunctionArgument a
-    => TLB.Builder -> a -> SqlExpr (Value b)
+    => TLB.Builder -> a -> SqlExpr b
 unsafeSqlFunction name arg =
     ERaw noMeta $ \p info ->
         let (argsTLB, argsVals) =
@@ -2258,7 +2262,7 @@ unsafeSqlFunction name arg =
 -- Since: 1.3.6.
 unsafeSqlExtractSubField
     :: UnsafeSqlFunctionArgument a
-    => TLB.Builder -> a -> SqlExpr (Value b)
+    => TLB.Builder -> a -> SqlExpr b
 unsafeSqlExtractSubField subField arg =
     ERaw noMeta $ \_ info ->
         let (argsTLB, argsVals) =
@@ -2270,7 +2274,7 @@ unsafeSqlExtractSubField subField arg =
 -- See 'unsafeSqlBinOp' for warnings.
 unsafeSqlFunctionParens
     :: UnsafeSqlFunctionArgument a
-    => TLB.Builder -> a -> SqlExpr (Value b)
+    => TLB.Builder -> a -> SqlExpr b
 unsafeSqlFunctionParens name arg =
     ERaw noMeta $ \p info ->
         let valueToFunctionArgParens (ERaw _ f) = f Never info
@@ -2281,7 +2285,7 @@ unsafeSqlFunctionParens name arg =
 
 -- | (Internal) An explicit SQL type cast using CAST(value as type).
 -- See 'unsafeSqlBinOp' for warnings.
-unsafeSqlCastAs :: T.Text -> SqlExpr (Value a) -> SqlExpr (Value b)
+unsafeSqlCastAs :: T.Text -> SqlExpr a -> SqlExpr b
 unsafeSqlCastAs t (ERaw _ f) = ERaw noMeta $ \_ -> ((first (\value -> "CAST" <> parens (value <> " AS " <> TLB.fromText t))) . f Never)
 
 -- | (Internal) This class allows 'unsafeSqlFunction' to work with different
@@ -2300,7 +2304,7 @@ class UnsafeSqlFunctionArgument a where
 instance UnsafeSqlFunctionArgument () where
     toArgList _ = []
 
-instance (a ~ Value b) => UnsafeSqlFunctionArgument (SqlExpr a) where
+instance (a ~ b) => UnsafeSqlFunctionArgument (SqlExpr a) where
     toArgList = (:[]) . veryUnsafeCoerceSqlExprValue
 
 instance UnsafeSqlFunctionArgument a => UnsafeSqlFunctionArgument [a] where
@@ -2409,16 +2413,16 @@ instance ( UnsafeSqlFunctionArgument a
   toArgList = toArgList . from10
 
 
--- | (Internal) Coerce a value's type from 'SqlExpr (Value a)' to
--- 'SqlExpr (Value b)'.  You should /not/ use this function
+-- | (Internal) Coerce a value's type from 'SqlExpr a' to
+-- 'SqlExpr b'.  You should /not/ use this function
 -- unless you know what you're doing!
-veryUnsafeCoerceSqlExprValue :: SqlExpr (Value a) -> SqlExpr (Value b)
+veryUnsafeCoerceSqlExprValue :: SqlExpr a -> SqlExpr b
 veryUnsafeCoerceSqlExprValue = coerce
 
 
 -- | (Internal) Coerce a value's type from 'SqlExpr (ValueList
--- a)' to 'SqlExpr (Value a)'.  Does not work with empty lists.
-veryUnsafeCoerceSqlExprValueList :: SqlExpr (ValueList a) -> SqlExpr (Value a)
+-- a)' to 'SqlExpr a'.  Does not work with empty lists.
+veryUnsafeCoerceSqlExprValueList :: SqlExpr (ValueList a) -> SqlExpr a
 veryUnsafeCoerceSqlExprValueList = coerce 
 
 
@@ -2789,7 +2793,7 @@ makeSelect info mode_ distinctClause ret = process mode_
                 first (("SELECT DISTINCT ON (" <>) . (<> ") "))
                 $ uncommas' (processExpr <$> exprs)
       where
-        processExpr e = materializeExpr info (coerce e :: SqlExpr (Value a))
+        processExpr e = materializeExpr info (coerce e :: SqlExpr a)
     withCols v = v <> sqlSelectCols info ret
     plain    v = (v, [])
 
@@ -2849,7 +2853,7 @@ makeFrom info mode fs = ret
 
     makeOnClause (ERaw _ f)        = first (" ON " <>) (f Never info)
 
-    mkExc :: SqlExpr (Value Bool) -> OnClauseWithoutMatchingJoinException
+    mkExc :: SqlExpr (Bool) -> OnClauseWithoutMatchingJoinException
     mkExc (ERaw _ f) =
         OnClauseWithoutMatchingJoinException $
             TL.unpack $ TLB.toLazyText $ fst (f Never info)
@@ -2929,13 +2933,51 @@ aliasedColumnName :: Ident -> IdentInfo -> T.Text -> TLB.Builder
 aliasedColumnName (I baseIdent) info columnName =
     useIdent info (I (baseIdent <> "_" <> columnName))
 
+type family UnSqlSelectTy a where
+    UnSqlSelectTy (a, b) = (UnSqlSelectTy a, UnSqlSelectTy b)
+    UnSqlSelectTy (a, b, c) = (UnSqlSelectTy a, UnSqlSelectTy b, UnSqlSelectTy c)
+    UnSqlSelectTy (a, b, c, d) = (UnSqlSelectTy a, UnSqlSelectTy b, UnSqlSelectTy c, UnSqlSelectTy d)
+    UnSqlSelectTy (a, b, c, d, e) = (UnSqlSelectTy a, UnSqlSelectTy b, UnSqlSelectTy c, UnSqlSelectTy d, UnSqlSelectTy e)
+    UnSqlSelectTy (a, b, c, d, e, f) = (UnSqlSelectTy a, UnSqlSelectTy b, UnSqlSelectTy c, UnSqlSelectTy d, UnSqlSelectTy e, UnSqlSelectTy f)
+    UnSqlSelectTy (a, b, c, d, e, f, g) = (UnSqlSelectTy a, UnSqlSelectTy b, UnSqlSelectTy c, UnSqlSelectTy d, UnSqlSelectTy e, UnSqlSelectTy f, UnSqlSelectTy g)
+    UnSqlSelectTy (a, b, c, d, e, f, g, h) = (UnSqlSelectTy a, UnSqlSelectTy b, UnSqlSelectTy c, UnSqlSelectTy d, UnSqlSelectTy e, UnSqlSelectTy f, UnSqlSelectTy g, UnSqlSelectTy h)
+    UnSqlSelectTy (a, b, c, d, e, f, g, h, i) = (UnSqlSelectTy a, UnSqlSelectTy b, UnSqlSelectTy c, UnSqlSelectTy d, UnSqlSelectTy e, UnSqlSelectTy f, UnSqlSelectTy g, UnSqlSelectTy h, UnSqlSelectTy i)
+    UnSqlSelectTy (a, b, c, d, e, f, g, h, i, j) = (UnSqlSelectTy a, UnSqlSelectTy b, UnSqlSelectTy c, UnSqlSelectTy d, UnSqlSelectTy e, UnSqlSelectTy f, UnSqlSelectTy g, UnSqlSelectTy h, UnSqlSelectTy i, UnSqlSelectTy j)
+    UnSqlSelectTy (a, b, c, d, e, f, g, h, i, j, k) = (UnSqlSelectTy a, UnSqlSelectTy b, UnSqlSelectTy c, UnSqlSelectTy d, UnSqlSelectTy e, UnSqlSelectTy f, UnSqlSelectTy g, UnSqlSelectTy h, UnSqlSelectTy i, UnSqlSelectTy j, UnSqlSelectTy k)
+    UnSqlSelectTy (a, b, c, d, e, f, g, h, i, j, k, l) = (UnSqlSelectTy a, UnSqlSelectTy b, UnSqlSelectTy c, UnSqlSelectTy d, UnSqlSelectTy e, UnSqlSelectTy f, UnSqlSelectTy g, UnSqlSelectTy h, UnSqlSelectTy i, UnSqlSelectTy j, UnSqlSelectTy k, UnSqlSelectTy l)
+    UnSqlSelectTy (a, b, c, d, e, f, g, h, i, j, k, l, m) = (UnSqlSelectTy a, UnSqlSelectTy b, UnSqlSelectTy c, UnSqlSelectTy d, UnSqlSelectTy e, UnSqlSelectTy f, UnSqlSelectTy g, UnSqlSelectTy h, UnSqlSelectTy i, UnSqlSelectTy j, UnSqlSelectTy k, UnSqlSelectTy l, UnSqlSelectTy m)
+    UnSqlSelectTy (a, b, c, d, e, f, g, h, i, j, k, l, m, n) = (UnSqlSelectTy a, UnSqlSelectTy b, UnSqlSelectTy c, UnSqlSelectTy d, UnSqlSelectTy e, UnSqlSelectTy f, UnSqlSelectTy g, UnSqlSelectTy h, UnSqlSelectTy i, UnSqlSelectTy j, UnSqlSelectTy k, UnSqlSelectTy l, UnSqlSelectTy m, UnSqlSelectTy n)
+    UnSqlSelectTy (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o) = (UnSqlSelectTy a, UnSqlSelectTy b, UnSqlSelectTy c, UnSqlSelectTy d, UnSqlSelectTy e, UnSqlSelectTy f, UnSqlSelectTy g, UnSqlSelectTy h, UnSqlSelectTy i, UnSqlSelectTy j, UnSqlSelectTy k, UnSqlSelectTy l, UnSqlSelectTy m, UnSqlSelectTy n, UnSqlSelectTy o)
+    UnSqlSelectTy (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p) = (UnSqlSelectTy a, UnSqlSelectTy b, UnSqlSelectTy c, UnSqlSelectTy d, UnSqlSelectTy e, UnSqlSelectTy f, UnSqlSelectTy g, UnSqlSelectTy h, UnSqlSelectTy i, UnSqlSelectTy j, UnSqlSelectTy k, UnSqlSelectTy l, UnSqlSelectTy m, UnSqlSelectTy n, UnSqlSelectTy o, UnSqlSelectTy p)
+    UnSqlSelectTy () = ()
+    UnSqlSelectTy a = SqlExpr a
+
+type family SqlSelectTy a where
+    SqlSelectTy (SqlExpr a) = a
+    SqlSelectTy (a, b) = (SqlSelectTy a, SqlSelectTy b)
+    SqlSelectTy (a, b, c) = (SqlSelectTy a, SqlSelectTy b, SqlSelectTy c)
+    SqlSelectTy (a, b, c, d) = (SqlSelectTy a, SqlSelectTy b, SqlSelectTy c, SqlSelectTy d)
+    SqlSelectTy (a, b, c, d, e) = (SqlSelectTy a, SqlSelectTy b, SqlSelectTy c, SqlSelectTy d, SqlSelectTy e)
+    SqlSelectTy (a, b, c, d, e, f) = (SqlSelectTy a, SqlSelectTy b, SqlSelectTy c, SqlSelectTy d, SqlSelectTy e, SqlSelectTy f)
+    SqlSelectTy (a, b, c, d, e, f, g) = (SqlSelectTy a, SqlSelectTy b, SqlSelectTy c, SqlSelectTy d, SqlSelectTy e, SqlSelectTy f, SqlSelectTy g)
+    SqlSelectTy (a, b, c, d, e, f, g, h) = (SqlSelectTy a, SqlSelectTy b, SqlSelectTy c, SqlSelectTy d, SqlSelectTy e, SqlSelectTy f, SqlSelectTy g, SqlSelectTy h)
+    SqlSelectTy (a, b, c, d, e, f, g, h, i) = (SqlSelectTy a, SqlSelectTy b, SqlSelectTy c, SqlSelectTy d, SqlSelectTy e, SqlSelectTy f, SqlSelectTy g, SqlSelectTy h, SqlSelectTy i)
+    SqlSelectTy (a, b, c, d, e, f, g, h, i, j) = (SqlSelectTy a, SqlSelectTy b, SqlSelectTy c, SqlSelectTy d, SqlSelectTy e, SqlSelectTy f, SqlSelectTy g, SqlSelectTy h, SqlSelectTy i, SqlSelectTy j)
+    SqlSelectTy (a, b, c, d, e, f, g, h, i, j, k) = (SqlSelectTy a, SqlSelectTy b, SqlSelectTy c, SqlSelectTy d, SqlSelectTy e, SqlSelectTy f, SqlSelectTy g, SqlSelectTy h, SqlSelectTy i, SqlSelectTy j, SqlSelectTy k)
+    SqlSelectTy (a, b, c, d, e, f, g, h, i, j, k, l) = (SqlSelectTy a, SqlSelectTy b, SqlSelectTy c, SqlSelectTy d, SqlSelectTy e, SqlSelectTy f, SqlSelectTy g, SqlSelectTy h, SqlSelectTy i, SqlSelectTy j, SqlSelectTy k, SqlSelectTy l)
+    SqlSelectTy (a, b, c, d, e, f, g, h, i, j, k, l, m) = (SqlSelectTy a, SqlSelectTy b, SqlSelectTy c, SqlSelectTy d, SqlSelectTy e, SqlSelectTy f, SqlSelectTy g, SqlSelectTy h, SqlSelectTy i, SqlSelectTy j, SqlSelectTy k, SqlSelectTy l, SqlSelectTy m)
+    SqlSelectTy (a, b, c, d, e, f, g, h, i, j, k, l, m, n) = (SqlSelectTy a, SqlSelectTy b, SqlSelectTy c, SqlSelectTy d, SqlSelectTy e, SqlSelectTy f, SqlSelectTy g, SqlSelectTy h, SqlSelectTy i, SqlSelectTy j, SqlSelectTy k, SqlSelectTy l, SqlSelectTy m, SqlSelectTy n)
+    SqlSelectTy (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o) = (SqlSelectTy a, SqlSelectTy b, SqlSelectTy c, SqlSelectTy d, SqlSelectTy e, SqlSelectTy f, SqlSelectTy g, SqlSelectTy h, SqlSelectTy i, SqlSelectTy j, SqlSelectTy k, SqlSelectTy l, SqlSelectTy m, SqlSelectTy n, SqlSelectTy o)
+    SqlSelectTy (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p) = (SqlSelectTy a, SqlSelectTy b, SqlSelectTy c, SqlSelectTy d, SqlSelectTy e, SqlSelectTy f, SqlSelectTy g, SqlSelectTy h, SqlSelectTy i, SqlSelectTy j, SqlSelectTy k, SqlSelectTy l, SqlSelectTy m, SqlSelectTy n, SqlSelectTy o, SqlSelectTy p)
+    SqlSelectTy () = () -- This is a special result, it is the only valid non SqlExpr result
+
 -- | (Internal) Class for mapping results coming from 'SqlQuery'
 -- into actual results.
 --
 -- This looks very similar to @RawSql@, and it is!  However,
 -- there are some crucial differences and ultimately they're
 -- different classes.
-class SqlSelect a r | a -> r, r -> a where
+class (SqlSelectTy a ~ r, UnSqlSelectTy r ~ a) => SqlSelect a r where
     -- | Creates the variable part of the @SELECT@ query and
     -- returns the list of 'PersistValue's that will be given to
     -- 'rawQuery'.
@@ -2970,6 +3012,7 @@ instance PersistEntity e => SqlSelect (SqlExpr (Insertion e)) (Insertion e) wher
     sqlSelectColCount   = const 0
     sqlSelectProcessRow =
       const (Right (throw (UnexpectedCaseErr InsertionFinalError)))
+
 
 -- | Not useful for 'select', but used for 'update' and 'delete'.
 instance SqlSelect () () where
@@ -3034,16 +3077,15 @@ instance PersistEntity a => SqlSelect (SqlExpr (Maybe (Entity a))) (Maybe (Entit
         | otherwise                 = Just <$> sqlSelectProcessRow cols
 
 
--- | You may return any single value (i.e. a single column) from
--- a 'select' query.
-instance PersistField a => SqlSelect (SqlExpr (Value a)) (Value a) where
+instance {-# OVERLAPPABLE #-} (UnSqlSelectTy a ~ SqlExpr a, PersistField a) 
+         => SqlSelect (SqlExpr a) a where
     sqlSelectCols = materializeExpr
     sqlSelectColCount = const 1
-    sqlSelectProcessRow [pv] = Value <$> fromPersistValue pv
-    sqlSelectProcessRow pvs  = Value <$> fromPersistValue (PersistList pvs)
+    sqlSelectProcessRow [pv] = fromPersistValue pv
+    sqlSelectProcessRow pvs  = fromPersistValue (PersistList pvs)
 
--- | Materialize a @SqlExpr (Value a)@.
-materializeExpr :: IdentInfo -> SqlExpr (Value a) -> (TLB.Builder, [PersistValue])
+-- | Materialize a @SqlExpr a@.
+materializeExpr :: IdentInfo -> SqlExpr a -> (TLB.Builder, [PersistValue])
 materializeExpr info (ERaw m f)
     | Just fields <- sqlExprMetaCompositeFields m = (uncommas $ fmap parens $ fields info, [])
     | Just alias <- sqlExprMetaAlias m
@@ -3570,7 +3612,7 @@ insertSelectCount = rawEsqueleto INSERT_INTO
 -- representation of the clauses passed to an "On" clause.
 --
 -- @since 3.2.0
-renderExpr :: SqlBackend -> SqlExpr (Value Bool) -> T.Text
+renderExpr :: SqlBackend -> SqlExpr (Bool) -> T.Text
 renderExpr sqlBackend e = case e of
     ERaw _ mkBuilderValues ->
          let (builder, _) = mkBuilderValues Never (sqlBackend, initialIdentState)
@@ -3592,7 +3634,7 @@ instance Exception RenderExprException
 -- (<https://github.com/prowdsponsor/esqueleto/issues/9>).
 valkey
     :: (ToBackendKey SqlBackend entity, PersistField (Key entity))
-    => Int64 -> SqlExpr (Value (Key entity))
+    => Int64 -> SqlExpr (Key entity)
 valkey = val . toSqlKey
 
 -- | @valJ@ is like @val@ but for something that is already a @Value@. The use
@@ -3608,7 +3650,7 @@ valkey = val . toSqlKey
 valJ
     :: (PersistField (Key entity))
     => Value (Key entity)
-    -> SqlExpr (Value (Key entity))
+    -> SqlExpr (Key entity)
 valJ = val . unValue
 
 

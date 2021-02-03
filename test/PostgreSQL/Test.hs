@@ -1,53 +1,55 @@
 {-# OPTIONS_GHC -fno-warn-unused-binds  #-}
-{-# LANGUAGE FlexibleContexts
-           , LambdaCase
-           , NamedFieldPuns
-           , OverloadedStrings
-           , RankNTypes
-           , ScopedTypeVariables
-           , TypeApplications
-           , TypeFamilies
-           , PartialTypeSignatures
- #-}
+{-# LANGUAGE FlexibleContexts      #-}
+{-# LANGUAGE LambdaCase            #-}
+{-# LANGUAGE NamedFieldPuns        #-}
+{-# LANGUAGE OverloadedStrings     #-}
+{-# LANGUAGE PartialTypeSignatures #-}
+{-# LANGUAGE RankNTypes            #-}
+{-# LANGUAGE ScopedTypeVariables   #-}
+{-# LANGUAGE TypeApplications      #-}
+{-# LANGUAGE TypeFamilies          #-}
 module Main (main) where
 
-import Data.Coerce
-import Data.Foldable
-import qualified Data.Map.Strict as Map
-import Data.Map (Map)
-import Data.Time
-import Control.Arrow ((&&&))
-import Control.Monad (void, when)
-import Control.Monad.Catch (MonadCatch, catch)
-import Control.Monad.IO.Class (MonadIO(liftIO))
-import Control.Monad.Logger (runStderrLoggingT, runNoLoggingT)
-import Control.Monad.Trans.Reader (ReaderT, ask)
-import qualified Control.Monad.Trans.Resource as R
-import Data.Aeson hiding (Value)
-import qualified Data.Aeson as A (Value)
-import Data.ByteString (ByteString)
-import qualified Data.Char as Char
-import qualified Data.List as L
-import Data.Ord (comparing)
-import qualified Data.Text as T
-import qualified Data.Text.Encoding as TE
-import Data.Time.Clock (getCurrentTime, diffUTCTime, UTCTime)
-import Database.Esqueleto hiding (random_)
-import Database.Esqueleto.Experimental hiding (random_, from, on)
-import qualified Database.Esqueleto.Experimental as Experimental
-import qualified Database.Esqueleto.Internal.Sql as ES
-import Database.Esqueleto.PostgreSQL (random_)
-import qualified Database.Esqueleto.PostgreSQL as EP
-import Database.Esqueleto.PostgreSQL.JSON hiding ((?.), (-.), (||.))
+import           Control.Arrow                      ((&&&))
+import           Control.Monad                      (void, when)
+import           Control.Monad.Catch                (MonadCatch, catch)
+import           Control.Monad.IO.Class             (MonadIO (liftIO))
+import           Control.Monad.Logger               (runNoLoggingT,
+                                                     runStderrLoggingT)
+import           Control.Monad.Trans.Reader         (ReaderT, ask)
+import qualified Control.Monad.Trans.Resource       as R
+import           Data.Aeson                         hiding (Value)
+import qualified Data.Aeson                         as A (Value)
+import           Data.ByteString                    (ByteString)
+import qualified Data.Char                          as Char
+import           Data.Coerce
+import           Data.Foldable
+import qualified Data.List                          as L
+import           Data.Map                           (Map)
+import qualified Data.Map.Strict                    as Map
+import           Data.Ord                           (comparing)
+import qualified Data.Text                          as T
+import qualified Data.Text.Encoding                 as TE
+import           Data.Time
+import           Data.Time.Clock                    (UTCTime, diffUTCTime,
+                                                     getCurrentTime)
+import           Database.Esqueleto                 hiding (random_)
+import           Database.Esqueleto.Experimental    hiding (from, on, random_)
+import qualified Database.Esqueleto.Experimental    as Experimental
+import qualified Database.Esqueleto.Internal.Sql    as ES
+import           Database.Esqueleto.PostgreSQL      (random_)
+import qualified Database.Esqueleto.PostgreSQL      as EP
+import           Database.Esqueleto.PostgreSQL.JSON hiding ((-.), (?.), (||.))
 import qualified Database.Esqueleto.PostgreSQL.JSON as JSON
-import Database.Persist.Postgresql (withPostgresqlConn)
-import Database.PostgreSQL.Simple (SqlError(..), ExecStatus(..))
-import System.Environment
-import Test.Hspec
-import Test.Hspec.QuickCheck
+import           Database.Persist.Postgresql        (withPostgresqlConn)
+import           Database.PostgreSQL.Simple         (ExecStatus (..),
+                                                     SqlError (..))
+import           System.Environment
+import           Test.Hspec
+import           Test.Hspec.QuickCheck
 
-import Common.Test
-import PostgreSQL.MigrateJSON
+import           Common.Test
+import           PostgreSQL.MigrateJSON
 
 
 
@@ -55,7 +57,7 @@ testPostgresqlCoalesce :: Spec
 testPostgresqlCoalesce = do
   it "works on PostgreSQL and MySQL with <2 arguments" $
     run $ do
-      _ :: [Value (Maybe Int)] <-
+      _ :: [Maybe Int] <-
         select $
         from $ \p -> do
         return (coalesce [p ^. PersonAge])
@@ -66,9 +68,9 @@ nameContains :: (BaseBackend backend ~ SqlBackend,
                  MonadIO m, SqlString s,
                  IsPersistBackend backend, PersistQueryRead backend,
                  PersistUniqueRead backend)
-             => (SqlExpr (Value [Char])
-             -> SqlExpr (Value s)
-             -> SqlExpr (Value Bool))
+             => (SqlExpr [Char]
+             -> SqlExpr s
+             -> SqlExpr Bool)
              -> s
              -> [Entity Person]
              -> ReaderT backend m ()
@@ -144,7 +146,7 @@ testPostgresqlRandom :: Spec
 testPostgresqlRandom = do
   it "works with random_" $
     run $ do
-      _ <- select $ return (random_ :: SqlExpr (Value Double))
+      _ <- select $ return (random_ :: SqlExpr Double)
       return ()
 
 
@@ -162,7 +164,7 @@ testPostgresqlSum = do
       ret <- select $
              from $ \p->
              return $ joinV $ sum_ (p ^. PersonAge)
-      liftIO $ ret `shouldBe` [ Value $ Just (36 + 17 + 17 :: Rational ) ]
+      liftIO $ ret `shouldBe` [ Just (36 + 17 + 17 :: Rational ) ]
 
 
 
@@ -271,7 +273,7 @@ testArrayAggWith = do
     it "works on an example" $ run $ do
       let people = [p1, p2, p3, p4, p5]
       mapM_ insert people
-      [Value (Just ret)] <-
+      [Just ret] <-
         select . from $ \p ->
           return (EP.arrayAggWith EP.AggModeAll (p ^. PersonName) [])
       liftIO $ L.sort ret `shouldBe` L.sort (map personName people)
@@ -288,7 +290,7 @@ testArrayAggWith = do
     it "works on an example" $ run $ do
       let people = [p1, p2, p3, p4, p5]
       mapM_ insert people
-      [Value (Just ret)] <-
+      [Just ret] <-
         select . from $ \p ->
           return (EP.arrayAggWith EP.AggModeDistinct (p ^. PersonAge) [])
       liftIO $ L.sort ret `shouldBe` [Nothing, Just 17, Just 36]
@@ -309,7 +311,7 @@ testArrayAggWith = do
     it "works on an example" $ run $ do
       let people = [p1, p2, p3, p4, p5]
       mapM_ insert people
-      [Value (Just ret)] <-
+      [Just ret] <-
         select . from $ \p ->
           return (EP.arrayAggWith EP.AggModeAll (p ^. PersonName) [])
       liftIO $ L.sort ret `shouldBe` L.sort (map personName people)
@@ -328,7 +330,7 @@ testArrayAggWith = do
     it "works on an example" $ run $ do
       let people = [p1, p2, p3, p4, p5]
       mapM_ insert people
-      [Value (Just ret)] <-
+      [Just ret] <-
         select . from $ \p ->
           return (EP.arrayAggWith EP.AggModeDistinct (p ^. PersonAge)
                    [asc $ p ^. PersonAge])
@@ -353,13 +355,13 @@ testStringAggWith = do
     it "works on an example" $ run $ do
       let people = [p1, p2, p3, p4, p5]
       mapM_ insert people
-      [Value (Just ret)] <-
+      [Just ret] <-
         select . from $ \p ->
           return (EP.stringAggWith EP.AggModeAll (p ^. PersonName) (val " ")[])
       liftIO $ (L.sort $ words ret) `shouldBe` L.sort (map personName people)
 
     it "works with zero rows" $ run $ do
-      [Value ret] <-
+      [ret] <-
         select . from $ \p ->
           return (EP.stringAggWith EP.AggModeAll (p ^. PersonName) (val " ")[])
       liftIO $ ret `shouldBe` Nothing
@@ -377,7 +379,7 @@ testStringAggWith = do
     it "works on an example" $ run $ do
       let people = [p1, p2, p3 {personName = "John"}, p4, p5]
       mapM_ insert people
-      [Value (Just ret)] <-
+      [Just ret] <-
         select . from $ \p ->
           return $ EP.stringAggWith EP.AggModeDistinct (p ^. PersonName) (val " ")
                    []
@@ -400,7 +402,7 @@ testStringAggWith = do
     it "works on an example" $ run $ do
       let people = [p1, p2, p3, p4, p5]
       mapM_ insert people
-      [Value (Just ret)] <-
+      [Just ret] <-
         select . from $ \p ->
           return $ EP.stringAggWith EP.AggModeAll (p ^. PersonName) (val " ")
                     [desc $ p ^. PersonName]
@@ -421,7 +423,7 @@ testStringAggWith = do
     it "works on an example" $ run $ do
       let people = [p1, p2, p3 {personName = "John"}, p4, p5]
       mapM_ insert people
-      [Value (Just ret)] <-
+      [ (Just ret)] <-
         select . from $ \p ->
           return $ EP.stringAggWith EP.AggModeDistinct (p ^. PersonName) (val " ")
                    [desc $ p ^. PersonName]
@@ -438,12 +440,12 @@ testAggregateFunctions = do
     it "looks sane" $ run $ do
       let people = [p1, p2, p3, p4, p5]
       mapM_ insert people
-      [Value (Just ret)] <-
+      [ (Just ret)] <-
         select . from $ \p -> return (EP.arrayAgg (p ^. PersonName))
       liftIO $ L.sort ret `shouldBe` L.sort (map personName people)
 
     it "works on zero rows" $ run $ do
-      [Value ret] <-
+      [ ret] <-
         select . from $ \p -> return (EP.arrayAgg (p ^. PersonName))
       liftIO $ ret `shouldBe` Nothing
   describe "arrayAggWith" testArrayAggWith
@@ -452,13 +454,13 @@ testAggregateFunctions = do
       run $ do
         let people = [p1, p2, p3, p4, p5]
         mapM_ insert people
-        [Value (Just ret)] <-
+        [ (Just ret)] <-
           select $
           from $ \p -> do
           return (EP.stringAgg (p ^. PersonName) (val " "))
         liftIO $ L.sort (words ret) `shouldBe` L.sort (map personName people)
     it "works on zero rows" $ run $ do
-      [Value ret] <-
+      [ ret] <-
         select . from $ \p -> return (EP.stringAgg (p ^. PersonName) (val " "))
       liftIO $ ret `shouldBe` Nothing
   describe "stringAggWith" testStringAggWith
@@ -475,12 +477,12 @@ testAggregateFunctions = do
         groupBy (person ^. PersonFavNum)
         return . EP.arrayRemoveNull . EP.maybeArray . EP.arrayAgg
           $ person ^. PersonAge
-      liftIO $ (L.sort $ map (L.sort . unValue) ret)
+      liftIO $ (L.sort $ map (L.sort) ret)
         `shouldBe` [[7], [8,9]]
 
   describe "maybeArray" $ do
     it "Coalesces NULL into an empty array" $ run $ do
-      [Value ret] <-
+      [ ret] <-
         select . from $ \p ->
           return (EP.maybeArray $ EP.arrayAgg (p ^. PersonName))
       liftIO $ ret `shouldBe` []
@@ -503,9 +505,9 @@ testPostgresModule = do
             )
           listOfDateParts
         truncateDate
-          :: SqlExpr (Value String)  -- ^ .e.g (val "day")
-          -> SqlExpr (Value UTCTime) -- ^ input field
-          -> SqlExpr (Value UTCTime) -- ^ truncated date
+          :: SqlExpr (String)  -- ^ .e.g (val "day")
+          -> SqlExpr (UTCTime) -- ^ input field
+          -> SqlExpr (UTCTime) -- ^ truncated date
         truncateDate datePart expr =
           ES.unsafeSqlFunction "date_trunc" (datePart, expr)
         vals =
@@ -544,13 +546,13 @@ testPostgresModule = do
     describe "Aggregate functions" testAggregateFunctions
     it "chr looks sane" $
       run $ do
-        [Value (ret :: String)] <- select $ return (EP.chr (val 65))
+        [ (ret :: String)] <- select $ return (EP.chr (val 65))
         liftIO $ ret `shouldBe` "A"
 
     it "allows unit for functions" $ do
       vals <- run $ do
         let
-          fn :: SqlExpr (Value UTCTime)
+          fn :: SqlExpr (UTCTime)
           fn = ES.unsafeSqlFunction "now" ()
         select $ pure fn
       vals `shouldSatisfy` ((1 ==) . length)
@@ -565,7 +567,7 @@ testPostgresModule = do
         liftIO $ nowDb `shouldSatisfy` (not . null)
 
         -- | Unpack the now value
-        let (Value now: _) = nowDb
+        let (now: _) = nowDb
 
         -- | Get the time diff and check it's less than a second
         liftIO $ diffUTCTime nowUtc now `shouldSatisfy` (< oneSecond)
@@ -1099,7 +1101,7 @@ testFilterWhere =
       -- Person "Mitch"  Nothing   Nothing   5
       _ <- insert p5
 
-      usersByAge <- (fmap . fmap) (\(Value a, Value b, Value c) -> (a, b, c)) <$> select $ from $ \users -> do
+      usersByAge <- (fmap . fmap) (\(a, b, c) -> (a, b, c)) <$> select $ from $ \users -> do
         groupBy $ users ^. PersonAge
         return
           ( users ^. PersonAge
@@ -1132,7 +1134,7 @@ testFilterWhere =
       -- Person "Mitch"  Nothing   Nothing   5
       _ <- insert p5
 
-      usersByAge <- (fmap . fmap) (\(Value a, Value b, Value c) -> (a, b, c)) <$> select $ from $ \users -> do
+      usersByAge <- (fmap . fmap) (\(a, b, c) -> (a, b, c)) <$> select $ from $ \users -> do
         groupBy $ users ^. PersonAge
         return
           ( users ^. PersonAge
@@ -1188,7 +1190,7 @@ testCommonTableExpressions = do
         res1 <- Experimental.from cte
         res2 <- Experimental.from cte2
         pure (res1, res2)
-    vals `shouldBe` (((,) <$> fmap Value [1..10] <*> fmap Value [1..10]))
+    vals `shouldBe` (((,) <$> [1..10] <*> [1..10]))
 
   it "passing previous query works" $
     let
@@ -1214,7 +1216,7 @@ testCommonTableExpressions = do
         cte2 <- oneMore cte
         res <- Experimental.from cte2
         pure res
-    vals `shouldBe` fmap Value [2..11]
+    vals `shouldBe` [2..11]
 
 -- Since lateral queries arent supported in Sqlite or older versions of mysql
 -- the test is in the Postgres module
@@ -1245,7 +1247,7 @@ testLateralQuery = do
                           `Experimental.on` (const $ val True)
           pure (l, c)
 
-        let _ = res :: [(Entity Lord, Value Int)]
+        let _ = res :: [(Entity Lord, Int)]
         pure ()
       True `shouldBe` True
 
@@ -1260,7 +1262,7 @@ testLateralQuery = do
                           `Experimental.on` (const $ val True)
           pure (l, c)
 
-        let _ = res :: [(Entity Lord, Value (Maybe Int))]
+        let _ = res :: [(Entity Lord, (Maybe Int))]
         pure ()
       True `shouldBe` True
 
@@ -1295,13 +1297,13 @@ testLateralQuery = do
 
 type JSONValue = Maybe (JSONB A.Value)
 
-createSaneSQL :: (PersistField a) => SqlExpr (Value a) -> T.Text -> [PersistValue] -> IO ()
+createSaneSQL :: (ES.SqlSelect (SqlExpr a) a, PersistField a) => SqlExpr a -> T.Text -> [PersistValue] -> IO ()
 createSaneSQL act q vals = run $ do
     (query, args) <- showQuery ES.SELECT $ fromValue act
     liftIO $ query `shouldBe` q
     liftIO $ args `shouldBe` vals
 
-fromValue :: (PersistField a) => SqlExpr (Value a) -> SqlQuery (SqlExpr (Value a))
+fromValue :: (PersistField a) => SqlExpr a -> SqlQuery (SqlExpr a)
 fromValue act = from $ \x -> do
     let _ = x :: SqlExpr (Entity Json)
     return act
@@ -1326,7 +1328,7 @@ sqlFailWith errState f = do
 
 selectJSONwhere
   :: MonadIO m
-  => (JSONBExpr A.Value -> SqlExpr (Value Bool))
+  => (JSONBExpr A.Value -> SqlExpr Bool)
   -> SqlPersistT m [Entity Json]
 selectJSONwhere f = selectJSON $ where_ . f
 

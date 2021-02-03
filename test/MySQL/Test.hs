@@ -1,30 +1,28 @@
-{-# LANGUAGE ScopedTypeVariables
-           , FlexibleContexts
-           , RankNTypes
-           , TypeFamilies
-           , TypeApplications
-#-}
+{-# LANGUAGE FlexibleContexts    #-}
+{-# LANGUAGE RankNTypes          #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications    #-}
+{-# LANGUAGE TypeFamilies        #-}
 
 module Main (main) where
 
-import Control.Monad (void)
-import Control.Monad.IO.Class (MonadIO(liftIO))
-import Control.Monad.Logger (runStderrLoggingT, runNoLoggingT)
-import Control.Monad.Trans.Reader (ReaderT)
-import Database.Persist.MySQL ( withMySQLConn
-                              , connectHost
-                              , connectDatabase
-                              , connectUser
-                              , connectPassword
-                              , connectPort
-                              , defaultConnectInfo)
-import Database.Esqueleto
-import Database.Esqueleto.Experimental hiding (from, on)
+import           Control.Monad                   (void)
+import           Control.Monad.IO.Class          (MonadIO (liftIO))
+import           Control.Monad.Logger            (runNoLoggingT,
+                                                  runStderrLoggingT)
+import           Control.Monad.Trans.Reader      (ReaderT)
+import qualified Control.Monad.Trans.Resource    as R
+import           Database.Esqueleto
+import           Database.Esqueleto.Experimental hiding (from, on)
 import qualified Database.Esqueleto.Experimental as Experimental
-import qualified Control.Monad.Trans.Resource as R
-import Test.Hspec
+import           Database.Persist.MySQL          (connectDatabase, connectHost,
+                                                  connectPassword, connectPort,
+                                                  connectUser,
+                                                  defaultConnectInfo,
+                                                  withMySQLConn)
+import           Test.Hspec
 
-import Common.Test
+import           Common.Test
 
 
 -- testMysqlRandom :: Spec
@@ -50,7 +48,7 @@ testMysqlSum = do
       ret <- select $
              from $ \p->
              return $ joinV $ sum_ (p ^. PersonAge)
-      liftIO $ ret `shouldBe` [ Value $ Just (36 + 17 + 17 :: Double ) ]
+      liftIO $ ret `shouldBe` [ Just (36 + 17 + 17 :: Double ) ]
 
 
 
@@ -94,7 +92,7 @@ testMysqlCoalesce :: Spec
 testMysqlCoalesce = do
   it "works on PostgreSQL and MySQL with <2 arguments" $
     run $ do
-      _ :: [Value (Maybe Int)] <-
+      _ :: [(Maybe Int)] <-
         select $
         from $ \p -> do
         return (coalesce [p ^. PersonAge])
@@ -137,9 +135,9 @@ nameContains :: (BaseBackend backend ~ SqlBackend,
                  MonadIO m, SqlString s,
                  IsPersistBackend backend, PersistQueryRead backend,
                  PersistUniqueRead backend)
-             => (SqlExpr (Value [Char])
-             -> SqlExpr (Value s)
-             -> SqlExpr (Value Bool))
+             => (SqlExpr ([Char])
+             -> SqlExpr (s)
+             -> SqlExpr (Bool))
              -> s
              -> [Entity Person]
              -> ReaderT backend m ()
@@ -188,7 +186,7 @@ testMysqlUnionWithLimits = do
 
 
         ret <- select $ Experimental.from $ SelectQuery q1 `Union` SelectQuery q2
-        liftIO $ ret `shouldMatchList` [Value 1, Value 2, Value 4, Value 5]
+        liftIO $ ret `shouldMatchList` [1, 2, 4, 5]
 
 
 main :: IO ()

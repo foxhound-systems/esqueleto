@@ -1,32 +1,25 @@
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeFamilies      #-}
 
 module Database.Esqueleto.Experimental.ToMaybe
     where
 
-import Database.Esqueleto.Internal.Internal hiding (From(..), from, on)
-import Database.Esqueleto.Internal.PersistentImport (Entity(..))
+import           Data.Coerce
+import           Database.Esqueleto.Internal.Internal         hiding (From (..),
+                                                               from, on)
+import           Database.Esqueleto.Internal.PersistentImport (Entity (..))
 
 type family Nullable a where
     Nullable (Maybe a) = a
-    Nullable a =  a
+    Nullable a = a
 
 class ToMaybe a where
     type ToMaybeT a
     toMaybe :: a -> ToMaybeT a
 
-instance ToMaybe (SqlExpr (Maybe a)) where
-    type ToMaybeT (SqlExpr (Maybe a)) = SqlExpr (Maybe a)
-    toMaybe = id
-
-instance ToMaybe (SqlExpr (Entity a)) where
-    type ToMaybeT (SqlExpr (Entity a)) = SqlExpr (Maybe (Entity a))
-    toMaybe (ERaw f m) = (ERaw f m)
-
-instance ToMaybe (SqlExpr (Value a)) where
-    type ToMaybeT (SqlExpr (Value a)) = SqlExpr (Value (Maybe (Nullable a)))
-    toMaybe = veryUnsafeCoerceSqlExprValue
-
+instance ToMaybe (SqlExpr a) where
+    type ToMaybeT (SqlExpr a) = SqlExpr (Maybe (Nullable a))
+    toMaybe = coerce
 
 instance (ToMaybe a, ToMaybe b) => ToMaybe (a,b) where
     type ToMaybeT (a, b) = (ToMaybeT a, ToMaybeT b)
