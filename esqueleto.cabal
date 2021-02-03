@@ -38,6 +38,7 @@ library
         Database.Esqueleto.PostgreSQL
         Database.Esqueleto.PostgreSQL.JSON
         Database.Esqueleto.SQLite
+        Database.Esqueleto.Internal.Compat
     other-modules:
         Database.Esqueleto.Internal.PersistentImport
         Database.Esqueleto.PostgreSQL.JSON.Instances

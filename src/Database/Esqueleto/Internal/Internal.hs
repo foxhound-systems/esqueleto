@@ -14,6 +14,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE PatternSynonyms #-}
     
 
 -- | This is an internal module, anything exported by this module
@@ -1110,22 +1111,6 @@ then_ = ()
 -- @since 2.1.2
 else_ :: expr a -> expr a
 else_ = id
-
--- | A single value (as opposed to a whole entity).  You may use
--- @('^.')@ or @('?.')@ to get a 'Value' from an 'Entity'.
-newtype Value a = Value { unValue :: a } deriving (Eq, Ord, Show, Typeable)
-
--- | @since 1.4.4
-instance Functor Value where
-    fmap f (Value a) = Value (f a)
-
-instance Applicative Value where
-  (<*>) (Value f) (Value a) = Value (f a)
-  pure = Value
-
-instance Monad Value where
-  (>>=) x f = valueJoin $ fmap f x
-    where valueJoin (Value v) = v
 
 -- | A list of single values.  There's a limited set of functions
 -- able to work with this data type (such as 'subList_select',
@@ -2296,7 +2281,7 @@ unsafeSqlCastAs t (ERaw _ f) = ERaw noMeta $ \_ -> ((first (\value -> "CAST" <> 
 -- also nest tuples, as e.g. @toArgList ((a,b),(c,d))@ is the same as
 -- @toArgList (a,b,c,d)@.
 class UnsafeSqlFunctionArgument a where
-    toArgList :: a -> [SqlExpr (Value ())]
+    toArgList :: a -> [SqlExpr ()]
 
 -- | Useful for 0-argument functions, like @now@ in Postgresql.
 --
@@ -3636,22 +3621,6 @@ valkey
     :: (ToBackendKey SqlBackend entity, PersistField (Key entity))
     => Int64 -> SqlExpr (Key entity)
 valkey = val . toSqlKey
-
--- | @valJ@ is like @val@ but for something that is already a @Value@. The use
--- case it was written for was, given a @Value@ lift the @Key@ for that @Value@
--- into the query expression in a type safe way. However, the implementation is
--- more generic than that so we call it @valJ@.
---
--- Its important to note that the input entity and the output entity are
--- constrained to be the same by the type signature on the function
--- (<https://github.com/prowdsponsor/esqueleto/pull/69>).
---
--- @since 1.4.2
-valJ
-    :: (PersistField (Key entity))
-    => Value (Key entity)
-    -> SqlExpr (Key entity)
-valJ = val . unValue
 
 
 -- | Synonym for 'Database.Persist.Store.delete' that does not

@@ -1,23 +1,24 @@
-{-# LANGUAGE FlexibleContexts    #-}
-{-# LANGUAGE OverloadedStrings   #-}
-{-# LANGUAGE RankNTypes          #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TypeFamilies        #-}
+{-# LANGUAGE ScopedTypeVariables
+           , FlexibleContexts
+           , RankNTypes
+           , TypeFamilies
+           , OverloadedStrings
+#-}
 
 module Main (main) where
 
-import           Control.Monad                (void)
-import           Control.Monad.IO.Class       (MonadIO (liftIO))
-import           Control.Monad.Logger         (runNoLoggingT, runStderrLoggingT)
-import           Control.Monad.Trans.Reader   (ReaderT)
+import Control.Monad (void)
+import Control.Monad.IO.Class (MonadIO(liftIO))
+import Control.Monad.Logger (runStderrLoggingT, runNoLoggingT)
+import Control.Monad.Trans.Reader (ReaderT)
+import Database.Persist.Sqlite (withSqliteConn)
+import Database.Sqlite (SqliteException)
+import Database.Esqueleto hiding (random_)
+import Database.Esqueleto.SQLite (random_)
 import qualified Control.Monad.Trans.Resource as R
-import           Database.Esqueleto           hiding (random_)
-import           Database.Esqueleto.SQLite    (random_)
-import           Database.Persist.Sqlite      (withSqliteConn)
-import           Database.Sqlite              (SqliteException)
-import           Test.Hspec
+import Test.Hspec
 
-import           Common.Test
+import Common.Test
 
 
 
@@ -26,7 +27,7 @@ testSqliteRandom :: Spec
 testSqliteRandom = do
   it "works with random_" $
     run $ do
-      _ <- select $ return (random_ :: SqlExpr (Int))
+      _ <- select $ return (random_ :: SqlExpr (Value Int))
       return ()
 
 
@@ -44,7 +45,7 @@ testSqliteSum = do
       ret <- select $
              from $ \p->
              return $ joinV $ sum_ (p ^. PersonAge)
-      liftIO $ ret `shouldBe` [ Just (36 + 17 + 17 :: Int) ]
+      liftIO $ ret `shouldBe` [ Value $ Just (36 + 17 + 17 :: Int) ]
 
 
 
@@ -93,7 +94,7 @@ testSqliteCoalesce = do
   it "throws an exception on SQLite with <2 arguments" $
     run (select $
          from $ \p -> do
-         return (coalesce [p ^. PersonAge]) :: SqlQuery (SqlExpr ((Maybe Int))))
+         return (coalesce [p ^. PersonAge]) :: SqlQuery (SqlExpr (Value (Maybe Int))))
     `shouldThrow` (\(_ :: SqliteException) -> True)
 
 
@@ -134,9 +135,9 @@ nameContains :: (BaseBackend backend ~ SqlBackend,
                  MonadIO m, SqlString s,
                  IsPersistBackend backend, PersistQueryRead backend,
                  PersistUniqueRead backend)
-             => (SqlExpr ([Char])
-             -> SqlExpr (s)
-             -> SqlExpr (Bool))
+             => (SqlExpr (Value [Char])
+             -> SqlExpr (Value s)
+             -> SqlExpr (Value Bool))
              -> s
              -> [Entity Person]
              -> ReaderT backend m ()
